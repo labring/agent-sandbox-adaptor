@@ -174,12 +174,13 @@ export class CommandPolyfillService {
     paths: string[],
     options?: { recursive?: boolean; force?: boolean }
   ): Promise<void> {
-    const flags = [options?.recursive !== false ? '-r' : '', options?.force !== false ? '-f' : '']
-      .filter(Boolean)
-      .join('');
+    const flagParts: string[] = [];
+    if (options?.recursive !== false) flagParts.push('r');
+    if (options?.force !== false) flagParts.push('f');
+    const flags = flagParts.length > 0 ? `-${flagParts.join('')}` : '';
 
     for (const path of paths) {
-      const result = await this.executor.execute(`rm ${flags} "${this.escapePath(path)}"`);
+      const result = await this.executor.execute(`rm ${flags} "${this.escapePath(path)}"`.trim());
       if (result.exitCode !== 0) {
         throw new FileOperationError(
           `Failed to delete directory: ${result.stderr}`,

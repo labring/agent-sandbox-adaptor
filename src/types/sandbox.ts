@@ -72,7 +72,7 @@ export interface SandboxConfig {
   env?: Record<string, string>;
 
   /** Metadata for the sandbox */
-  metadata?: Record<string, string>;
+  metadata?: Record<string, any>;
 
   /** Network access policy */
   networkPolicy?: NetworkPolicy;

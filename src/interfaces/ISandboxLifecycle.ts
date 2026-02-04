@@ -47,7 +47,7 @@ export interface ISandboxLifecycle {
   /**
    * Get detailed information about the sandbox.
    */
-  getInfo(): Promise<SandboxInfo>;
+  getInfo(): Promise<SandboxInfo | null>;
 
   /**
    * Wait until the sandbox is ready (healthy and responsive).

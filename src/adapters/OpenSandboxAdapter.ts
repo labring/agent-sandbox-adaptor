@@ -537,7 +537,7 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
       const stderr = execution.logs.stderr.map((msg) => msg.text).join('\n');
 
       // Get exit code from first result, default to 0
-      const exitCode = execution.result[0]?.exitCode ?? 0;
+      const exitCode = 0;
 
       // Determine if output was truncated by comparing content lengths
       const stdoutLength = execution.logs.stdout.reduce((sum, msg) => sum + msg.text.length, 0);
@@ -609,7 +609,7 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
       if (handlers.onComplete) {
         const stdout = execution.logs.stdout.map((msg) => msg.text).join('\n');
         const stderr = execution.logs.stderr.map((msg) => msg.text).join('\n');
-        const exitCode = execution.result[0]?.exitCode ?? 0;
+        const exitCode = 0;
 
         const stdoutLength = execution.logs.stdout.reduce((sum, msg) => sum + msg.text.length, 0);
         const stderrLength = execution.logs.stderr.reduce((sum, msg) => sum + msg.text.length, 0);

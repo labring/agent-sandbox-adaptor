@@ -53,7 +53,7 @@ export abstract class BaseSandboxAdapter implements ISandbox {
   abstract pause(): Promise<void>;
   abstract resume(): Promise<void>;
   abstract delete(): Promise<void>;
-  abstract getInfo(): Promise<SandboxInfo>;
+  abstract getInfo(): Promise<SandboxInfo | null>;
   abstract close(): Promise<void>;
 
   async waitUntilReady(timeoutMs: number = 120000): Promise<void> {

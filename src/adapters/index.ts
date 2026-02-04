@@ -1,8 +1,9 @@
 import { ISandbox } from '../interfaces';
+import { FastGPTSandboxAdapter, FastGPTSandboxConfig } from './FastGPTSandboxAdapter';
 import { MinimalProviderAdapter, MinimalProviderConfig } from './MinimalProviderAdapter';
 import { OpenSandboxAdapter, OpenSandboxConnectionConfig } from './OpenSandboxAdapter';
 
-type CreateProvoderType =
+type CreateProviderType =
   | {
       provider: 'opensandbox';
       config: OpenSandboxConnectionConfig;
@@ -10,6 +11,10 @@ type CreateProvoderType =
   | {
       provider: 'minimal';
       config: MinimalProviderConfig;
+    }
+  | {
+      provider: 'fastgpt';
+      config: FastGPTSandboxConfig;
     };
 
 /**
@@ -19,17 +24,16 @@ type CreateProvoderType =
  * @returns Configured sandbox instance
  * @throws Error if provider type is unknown
  */
-export const createSandbox = ({ provider, config }: CreateProvoderType): ISandbox => {
+export const createSandbox = ({ provider, config }: CreateProviderType): ISandbox => {
   switch (provider) {
     case 'opensandbox':
-      return new OpenSandboxAdapter({
-        baseUrl: config.baseUrl,
-        apiKey: config.apiKey,
-        runtime: config.runtime
-      });
+      return new OpenSandboxAdapter(config);
 
     case 'minimal':
       return new MinimalProviderAdapter(config);
+
+    case 'fastgpt':
+      return new FastGPTSandboxAdapter(config);
 
     default:
       throw new Error(`Unknown provider: ${provider}`);
