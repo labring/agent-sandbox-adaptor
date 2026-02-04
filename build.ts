@@ -1,6 +1,9 @@
 import { rmSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
+// External dependencies (peer dependencies)
+const EXTERNAL_DEPS = ['@alibaba-group/opensandbox', '@fastgpt-sdk/sandbox-server'];
+
 // Clean dist directory
 console.log('🧹 Cleaning dist directory...');
 rmSync('dist', { recursive: true, force: true });
@@ -12,10 +15,10 @@ const result = await Bun.build({
   outdir: './dist',
   target: 'node',
   format: 'esm',
-  splitting: true,
+  splitting: false,
   sourcemap: 'none',
   minify: false,
-  external: ['@alibaba-group/opensandbox']
+  external: EXTERNAL_DEPS
 });
 
 if (!result.success) {

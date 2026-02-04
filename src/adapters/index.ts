@@ -1,7 +1,21 @@
 import { ISandbox } from '../interfaces';
-import { FastGPTSandboxAdapter, FastGPTSandboxConfig } from './FastGPTSandboxAdapter';
-import { MinimalProviderAdapter, MinimalProviderConfig } from './MinimalProviderAdapter';
-import { OpenSandboxAdapter, OpenSandboxConnectionConfig } from './OpenSandboxAdapter';
+import { FastGPTSandboxAdapter, type FastGPTSandboxConfig } from './FastGPTSandboxAdapter';
+import { MinimalProviderAdapter, type MinimalProviderConfig } from './MinimalProviderAdapter';
+import { OpenSandboxAdapter, type OpenSandboxConnectionConfig } from './OpenSandboxAdapter';
+
+// Re-export adapters and their configs
+export { BaseSandboxAdapter } from './BaseSandboxAdapter';
+export { FastGPTSandboxAdapter, type FastGPTSandboxConfig } from './FastGPTSandboxAdapter';
+export {
+  MinimalProviderAdapter,
+  type MinimalProviderConfig,
+  type MinimalProviderConnection
+} from './MinimalProviderAdapter';
+export {
+  OpenSandboxAdapter,
+  type OpenSandboxConnectionConfig,
+  type SandboxRuntimeType
+} from './OpenSandboxAdapter';
 
 type CreateProviderType =
   | {
