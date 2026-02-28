@@ -97,6 +97,19 @@ describe('MinimalProviderAdapter', () => {
     });
   });
 
+  describe('create', () => {
+    it('should create sandbox via connection factory', async () => {
+      const adapterWithFactory = new MinimalProviderAdapter({
+        connectionFactory: async () => mockConnection
+      });
+
+      await adapterWithFactory.create({ image: { repository: 'alpine' } });
+
+      expect(adapterWithFactory.id).toBe('mock-minimal-id');
+      expect(adapterWithFactory.status.state).toBe('Running');
+    });
+  });
+
   describe('execute', () => {
     beforeEach(async () => {
       await adapter.connect(mockConnection);
@@ -121,8 +134,8 @@ describe('MinimalProviderAdapter', () => {
 
     it('should read files via polyfill', async () => {
       const results = await adapter.readFiles(['/test.txt']);
-      // The polyfill will execute cat + base64
       expect(results).toBeDefined();
+      expect(results[0].content).toBeInstanceOf(Uint8Array);
     });
 
     it('should list directories via polyfill', async () => {
@@ -133,8 +146,41 @@ describe('MinimalProviderAdapter', () => {
 
     it('should write files via polyfill', async () => {
       const results = await adapter.writeFiles([{ path: '/test.txt', data: 'content' }]);
-      // Polyfill service handles the write
       expect(results).toBeDefined();
+      expect(results[0].error).toBeNull();
+    });
+  });
+
+  describe('lifecycle operations', () => {
+    beforeEach(async () => {
+      await adapter.connect(mockConnection);
+    });
+
+    it('should start successfully', async () => {
+      await adapter.start();
+      expect(adapter.status.state).toBe('Running');
+    });
+
+    it('should stop successfully', async () => {
+      await adapter.stop();
+      expect(adapter.status.state).toBe('Stopped');
+    });
+
+    it('should delete successfully', async () => {
+      await adapter.delete();
+      expect(adapter.status.state).toBe('UnExist');
+    });
+
+    it('should return sandbox info', async () => {
+      const info = await adapter.getInfo();
+      expect(info).not.toBeNull();
+      expect(info?.id).toBe('mock-minimal-id');
+    });
+
+    it('should return null for getInfo when not connected', async () => {
+      const disconnectedAdapter = new MinimalProviderAdapter();
+      const info = await disconnectedAdapter.getInfo();
+      expect(info).toBeNull();
     });
   });
 
@@ -143,33 +189,18 @@ describe('MinimalProviderAdapter', () => {
       await adapter.connect(mockConnection);
     });
 
-    it('should throw FeatureNotSupportedError for pause', async () => {
-      try {
-        await adapter.pause();
-        expect(false).toBe(true);
-      } catch (error) {
-        expect(error).toBeInstanceOf(FeatureNotSupportedError);
-        expect((error as FeatureNotSupportedError).feature).toBe('pause');
-      }
-    });
-
-    it('should throw FeatureNotSupportedError for resume', async () => {
-      try {
-        await adapter.resume();
-        expect(false).toBe(true);
-      } catch (error) {
-        expect(error).toBeInstanceOf(FeatureNotSupportedError);
-        expect((error as FeatureNotSupportedError).feature).toBe('resume');
-      }
-    });
-
     it('should throw FeatureNotSupportedError for renewExpiration', async () => {
-      try {
-        await adapter.renewExpiration(3600);
-        expect(false).toBe(true);
-      } catch (error) {
-        expect(error).toBeInstanceOf(FeatureNotSupportedError);
-      }
+      await expect(adapter.renewExpiration(3600)).rejects.toThrow(FeatureNotSupportedError);
+    });
+
+    it('should throw FeatureNotSupportedError for executeBackground', async () => {
+      await expect(adapter.executeBackground('sleep 100')).rejects.toThrow(
+        FeatureNotSupportedError
+      );
+    });
+
+    it('should throw FeatureNotSupportedError for interrupt', async () => {
+      await expect(adapter.interrupt('session-id')).rejects.toThrow(FeatureNotSupportedError);
     });
   });
 
@@ -205,6 +236,12 @@ describe('MinimalProviderAdapter', () => {
       });
 
       expect(stdoutChunks.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe('Provider', () => {
+    it('should have correct provider name', () => {
+      expect(adapter.provider).toBe('minimal');
     });
   });
 });

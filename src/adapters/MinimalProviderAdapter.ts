@@ -1,4 +1,5 @@
-import { FeatureNotSupportedError } from '../errors';
+import { CommandPolyfillService } from '@/polyfill/CommandPolyfillService';
+import { ConnectionError } from '../errors';
 import type {
   ExecuteOptions,
   ExecuteResult,
@@ -27,7 +28,6 @@ export interface MinimalProviderConnection {
   /** Get current status */
   getStatus(): Promise<SandboxStatus>;
 
-  /** Close the connection */
   close(): Promise<void>;
 }
 
@@ -38,9 +38,8 @@ export type MinimalProviderConfig = {
 /**
  * Minimal provider adapter.
  *
- * This demonstrates how to adapt a provider with minimal capabilities
- * (only command execution) to the full ISandbox interface using
- * the CommandPolyfillService.
+ * Adapts a provider with minimal capabilities (only command execution)
+ * to the full ISandbox interface using the CommandPolyfillService.
  *
  * Use case: Legacy SSH-based sandboxes, custom container providers,
  * or any provider that only exposes a shell interface.
@@ -53,32 +52,32 @@ export class MinimalProviderAdapter extends BaseSandboxAdapter {
 
   constructor(private config?: MinimalProviderConfig) {
     super();
+    this.polyfillService = new CommandPolyfillService(this);
   }
 
   get id(): SandboxId {
     return this._id;
   }
 
-  get status(): SandboxStatus {
-    return this._status;
-  }
-
   // ==================== Lifecycle Methods ====================
 
   async create(config: SandboxConfig): Promise<void> {
-    // Minimal provider assumes sandbox is created externally
-    // This would typically involve calling an API to create the sandbox
-    if (this.config?.connectionFactory) {
+    if (!this.config?.connectionFactory) {
+      throw new ConnectionError('Connection factory not provided');
+    }
+
+    try {
+      this._status = { state: 'Creating' };
       this.connection = await this.config.connectionFactory();
       this._id = this.connection.id;
       this._status = { state: 'Running' };
 
-      // Run any setup commands from config
       if (config.entrypoint && config.entrypoint.length > 0) {
         await this.execute(config.entrypoint.join(' '));
       }
-    } else {
-      throw new Error('Connection factory not provided');
+    } catch (error) {
+      this._status = { state: 'Error', message: String(error) };
+      throw new ConnectionError('Failed to create sandbox', undefined, error);
     }
   }
 
@@ -89,40 +88,25 @@ export class MinimalProviderAdapter extends BaseSandboxAdapter {
   }
 
   async start(): Promise<void> {
-    // No-op: minimal provider doesn't support explicit start
     this._status = { state: 'Running' };
   }
 
   async stop(): Promise<void> {
-    // Execute shutdown command
     await this.execute('exit 0').catch(() => {
       // Expected to fail as connection closes
     });
-    this._status = { state: 'Deleted' };
-  }
-
-  async pause(): Promise<void> {
-    throw new FeatureNotSupportedError(
-      'Pause not supported by minimal provider',
-      'pause',
-      this.provider
-    );
-  }
-
-  async resume(): Promise<void> {
-    throw new FeatureNotSupportedError(
-      'Resume not supported by minimal provider',
-      'resume',
-      this.provider
-    );
+    await this.connection?.close();
+    this._status = { state: 'Stopped' };
   }
 
   async delete(): Promise<void> {
     await this.stop();
-    await this.connection?.close();
+    this._status = { state: 'UnExist' };
   }
 
-  async getInfo(): Promise<SandboxInfo> {
+  async getInfo(): Promise<SandboxInfo | null> {
+    if (!this.connection) return null;
+
     return {
       id: this._id,
       image: { repository: 'minimal', tag: 'latest' },
@@ -132,10 +116,6 @@ export class MinimalProviderAdapter extends BaseSandboxAdapter {
     };
   }
 
-  async close(): Promise<void> {
-    await this.connection?.close();
-  }
-
   // ==================== Command Execution ====================
 
   async execute(command: string, options?: ExecuteOptions): Promise<ExecuteResult> {
@@ -143,19 +123,16 @@ export class MinimalProviderAdapter extends BaseSandboxAdapter {
       throw new Error('Not connected to minimal provider');
     }
 
-    // Handle working directory option
     let finalCommand = command;
     if (options?.workingDirectory) {
       finalCommand = `cd "${options.workingDirectory}" && ${command}`;
     }
 
-    // Handle timeout via timeout command
     if (options?.timeoutMs && options.timeoutMs > 0) {
       const timeoutSec = Math.ceil(options.timeoutMs / 1000);
       finalCommand = `timeout ${timeoutSec} sh -c '${finalCommand.replace(/'/g, "'\"'\"'")}'`;
     }
 
-    // Handle environment variables
     if (options?.env && Object.keys(options.env).length > 0) {
       const envVars = Object.entries(options.env)
         .map(([k, v]) => `${k}="${v.replace(/"/g, '"')}"`)

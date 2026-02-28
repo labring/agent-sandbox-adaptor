@@ -16,10 +16,4 @@ import type { ISandboxLifecycle } from './ISandboxLifecycle';
 export interface ISandbox extends ISandboxLifecycle, ICommandExecution, IFileSystem, IHealthCheck {
   /** Provider name (e.g., 'opensandbox') */
   readonly provider: string;
-
-  /**
-   * Close the connection and release resources.
-   * Should be called when done with the sandbox.
-   */
-  close(): Promise<void>;
 }

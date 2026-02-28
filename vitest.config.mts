@@ -37,8 +37,15 @@ export default defineConfig({
     }
   },
   test: {
-    // This configuration runs the sandbox tests in isolation,
-    // without the global setup (e.g., MongoDB connection) from the root config.
+    coverage: {
+      enabled: true,
+      reporter: ['text', 'text-summary', 'html', 'json-summary', 'json'],
+      reportOnFailure: true,
+      all: false, // 只包含被测试实际覆盖的文件，不包含空目录
+      include: ['src/**/*.ts'],
+      exclude: [],
+      cleanOnRerun: false
+    },
     dir: 'tests',
     testTimeout: 30000
   }

@@ -2,7 +2,7 @@ import { rmSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
 // External dependencies (peer dependencies)
-const EXTERNAL_DEPS = ['@alibaba-group/opensandbox', '@fastgpt-sdk/sandbox-server'];
+const EXTERNAL_DEPS = ['@alibaba-group/opensandbox'];
 
 // Clean dist directory
 console.log('🧹 Cleaning dist directory...');

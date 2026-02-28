@@ -16,7 +16,7 @@ describe('OpenSandboxAdapter', () => {
 
       expect(adapter.provider).toBe('opensandbox');
       expect(adapter.id).toBe('');
-      expect(adapter.connectionState).toBe('disconnected');
+      expect(adapter.status.state).toBe('Creating');
     });
 
     it('should initialize with custom connection config', () => {
@@ -26,17 +26,7 @@ describe('OpenSandboxAdapter', () => {
       });
 
       expect(adapter.provider).toBe('opensandbox');
-      expect(adapter.connectionState).toBe('disconnected');
-    });
-
-    it('should handle connection state transitions', async () => {
-      const adapter = new OpenSandboxAdapter();
-
-      // Initially disconnected
-      expect(adapter.connectionState).toBe('disconnected');
-
-      // After creation, should be connected (mocked)
-      // Note: Actual SDK calls are mocked in integration tests
+      expect(adapter.status.state).toBe('Creating');
     });
 
     it('should throw SandboxStateError when accessing sandbox before initialization', async () => {
@@ -84,9 +74,16 @@ describe('OpenSandboxAdapter', () => {
 
       // Status should be accessible
       expect(adapter.status).toBeDefined();
-      expect(['Creating', 'Running', 'Stopped', 'Paused', 'Deleted', 'Error']).toContain(
-        adapter.status.state
-      );
+      expect([
+        'UnExist',
+        'Running',
+        'Creating',
+        'Starting',
+        'Stopping',
+        'Stopped',
+        'Deleting',
+        'Error'
+      ]).toContain(adapter.status.state);
     });
   });
 
@@ -243,26 +240,29 @@ describe('OpenSandboxAdapter', () => {
   });
 
   describe('Lifecycle State Management', () => {
-    it('should track connection state correctly', () => {
+    it('should track status state correctly', () => {
       const adapter = new OpenSandboxAdapter();
 
       // Initial state
-      expect(adapter.connectionState).toBe('disconnected');
+      expect(adapter.status.state).toBe('Creating');
 
       // States should be one of the valid values
-      const validStates = ['disconnected', 'connecting', 'connected', 'closed'];
-      expect(validStates).toContain(adapter.connectionState);
+      const validStates = [
+        'UnExist',
+        'Running',
+        'Creating',
+        'Starting',
+        'Stopping',
+        'Stopped',
+        'Deleting',
+        'Error'
+      ];
+      expect(validStates).toContain(adapter.status.state);
     });
 
-    it('should reset state on close', async () => {
+    it('should have empty id initially', () => {
       const adapter = new OpenSandboxAdapter();
-
-      // Before close
       expect(adapter.id).toBe('');
-
-      // After close should reset
-      await adapter.close();
-      expect(adapter.connectionState).toBe('closed');
     });
   });
 
@@ -305,15 +305,11 @@ describe('OpenSandboxAdapter', () => {
     });
 
     it('should create SandboxStateError with expected state', () => {
-      const stateError = new SandboxStateError(
-        'Sandbox not initialized',
-        'disconnected',
-        'connected'
-      );
+      const stateError = new SandboxStateError('Sandbox not initialized', 'UnExist', 'Running');
 
       expect(stateError.message).toContain('Sandbox not initialized');
-      expect(stateError.currentState).toBe('disconnected');
-      expect(stateError.requiredState).toBe('connected');
+      expect(stateError.currentState).toBe('UnExist');
+      expect(stateError.requiredState).toBe('Running');
     });
   });
 
@@ -374,18 +370,18 @@ describe('OpenSandboxAdapter', () => {
       });
 
       expect(adapter.runtime).toBe('kubernetes');
-      expect(adapter.connectionState).toBe('disconnected');
+      expect(adapter.status.state).toBe('Creating');
     });
   });
 
   describe('Runtime State Transitions', () => {
-    it('should track runtime type independently of connection state', () => {
+    it('should track runtime type independently of status state', () => {
       const dockerAdapter = new OpenSandboxAdapter({ runtime: 'docker' });
       const k8sAdapter = new OpenSandboxAdapter({ runtime: 'kubernetes' });
 
-      // Both start disconnected
-      expect(dockerAdapter.connectionState).toBe('disconnected');
-      expect(k8sAdapter.connectionState).toBe('disconnected');
+      // Both start with Creating state
+      expect(dockerAdapter.status.state).toBe('Creating');
+      expect(k8sAdapter.status.state).toBe('Creating');
 
       // Runtime types are preserved
       expect(dockerAdapter.runtime).toBe('docker');
@@ -397,10 +393,14 @@ describe('OpenSandboxAdapter', () => {
 
       // Runtime is immutable
       expect(adapter.runtime).toBe('kubernetes');
+    });
+  });
 
-      // After close, runtime should still be preserved
-      await adapter.close();
-      expect(adapter.runtime).toBe('kubernetes');
+  describe('getInfo', () => {
+    it('should return null when sandbox not initialized', async () => {
+      const adapter = new OpenSandboxAdapter();
+      const info = await adapter.getInfo();
+      expect(info).toBeNull();
     });
   });
 });

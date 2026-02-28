@@ -83,33 +83,11 @@ export class MockSandboxAdapter extends BaseSandboxAdapter {
   }
 
   async stop(): Promise<void> {
-    this._status = { state: 'Deleted' };
-  }
-
-  async pause(): Promise<void> {
-    if (!this.supportsPauseResume) {
-      throw new FeatureNotSupportedError(
-        'Pause not supported by mock provider',
-        'pause',
-        this.provider
-      );
-    }
-    this._status = { state: 'Paused' };
-  }
-
-  async resume(): Promise<void> {
-    if (!this.supportsPauseResume) {
-      throw new FeatureNotSupportedError(
-        'Resume not supported by mock provider',
-        'resume',
-        this.provider
-      );
-    }
-    this._status = { state: 'Running' };
+    this._status = { state: 'Stopped' };
   }
 
   async delete(): Promise<void> {
-    this._status = { state: 'Deleted' };
+    this._status = { state: 'UnExist' };
   }
 
   async getInfo(): Promise<SandboxInfo> {
@@ -120,10 +98,6 @@ export class MockSandboxAdapter extends BaseSandboxAdapter {
       status: this._status,
       createdAt: new Date()
     };
-  }
-
-  async close(): Promise<void> {
-    // No-op
   }
 
   async renewExpiration(_additionalSeconds: number): Promise<void> {

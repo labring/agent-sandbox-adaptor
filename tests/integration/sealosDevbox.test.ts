@@ -1,31 +1,31 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { FastGPTSandboxAdapter, type FastGPTSandboxConfig } from '@/adapters/FastGPTSandboxAdapter';
+import { SealosDevboxAdapter, type SealosDevboxConfig } from '@/adapters/SealosDevboxAdapter';
 import type { SandboxConfig } from '@/types';
 
 /**
- * Integration tests for FastGPTSandboxAdapter.
+ * Integration tests for SealosDevboxAdapter.
  *
- * These tests require a running FastGPT Sandbox Server.
+ * These tests require a running Sealos Devbox Server.
  * Set the following environment variables to run:
- *   - FASTGPT_SANDBOX_SERVER_URL
- *   - FASTGPT_SANDBOX_SERVER_TOKEN
+ *   - SEALOS_DEVBOX_SERVER_URL
+ *   - SEALOS_DEVBOX_SERVER_TOKEN
  */
 
-const SANDBOX_URL = process.env.FASTGPT_SANDBOX_SERVER_URL;
-const SANDBOX_TOKEN = process.env.FASTGPT_SANDBOX_SERVER_TOKEN;
+const SANDBOX_URL = process.env.SEALOS_DEVBOX_SERVER_URL;
+const SANDBOX_TOKEN = process.env.SEALOS_DEVBOX_SERVER_TOKEN;
 
 // Skip all tests if environment variables are not set
 const shouldRun = Boolean(SANDBOX_URL && SANDBOX_TOKEN);
 
-describe.skipIf(!shouldRun)('FastGPTSandboxAdapter Integration Tests', () => {
-  let adapter: FastGPTSandboxAdapter;
+describe.skipIf(!shouldRun)('SealosDevboxAdapter Integration Tests', () => {
+  let adapter: SealosDevboxAdapter;
   const randomThreeDigits = Math.floor(100 + Math.random() * 900);
-  const containerName = `test-${Date.now()}-${randomThreeDigits}`;
+  const devboxName = `test-${Date.now()}-${randomThreeDigits}`;
 
-  const config: FastGPTSandboxConfig = {
+  const config: SealosDevboxConfig = {
     baseUrl: SANDBOX_URL!,
     token: SANDBOX_TOKEN!,
-    containerName
+    sandboxId: devboxName
   };
 
   const sandboxConfig: SandboxConfig = {
@@ -33,7 +33,7 @@ describe.skipIf(!shouldRun)('FastGPTSandboxAdapter Integration Tests', () => {
   };
 
   beforeAll(async () => {
-    adapter = new FastGPTSandboxAdapter(config);
+    adapter = new SealosDevboxAdapter(config);
   });
 
   afterAll(async () => {
@@ -45,12 +45,20 @@ describe.skipIf(!shouldRun)('FastGPTSandboxAdapter Integration Tests', () => {
     }
   });
 
-  // ==================== 1. Container Lifecycle Operations ====================
+  // 基本测试
+  describe('Basic Tests', () => {
+    it('should initialize with correct values', () => {
+      expect(adapter.provider).toBe('sealos-devbox');
+      expect(adapter.id).toBe(devboxName);
+    });
+  });
+
+  // ==================== Container Lifecycle Operations ====================
   describe('Container Lifecycle Operations', () => {
     describe('initialization', () => {
       it('should initialize with correct values', () => {
-        expect(adapter.provider).toBe('fastgpt');
-        expect(adapter.id).toBe(containerName);
+        expect(adapter.provider).toBe('sealos-devbox');
+        expect(adapter.id).toBe(devboxName);
       });
     });
 
@@ -72,7 +80,7 @@ describe.skipIf(!shouldRun)('FastGPTSandboxAdapter Integration Tests', () => {
         const info = await adapter.getInfo();
 
         expect(info).not.toBeNull();
-        expect(info?.id).toBe(containerName);
+        expect(info?.id).toBe(devboxName);
         expect(info?.status.state).toBe('Running');
       });
     });
@@ -87,13 +95,13 @@ describe.skipIf(!shouldRun)('FastGPTSandboxAdapter Integration Tests', () => {
 
     describe('pause() and resume()', () => {
       it('should pause the container', async () => {
-        await adapter.pause();
+        await adapter.stop();
 
-        expect(adapter.status.state).toBe('Paused');
+        expect(adapter.status.state).toBe('Stopped');
       });
 
       it('should resume the container', async () => {
-        await adapter.resume();
+        await adapter.start();
 
         expect(adapter.status.state).toBe('Running');
       });
@@ -103,7 +111,7 @@ describe.skipIf(!shouldRun)('FastGPTSandboxAdapter Integration Tests', () => {
       it('should stop the container', async () => {
         await adapter.stop();
 
-        expect(adapter.status.state).toBe('Paused');
+        expect(adapter.status.state).toBe('Stopped');
       });
 
       it('should start the container', async () => {
@@ -120,7 +128,7 @@ describe.skipIf(!shouldRun)('FastGPTSandboxAdapter Integration Tests', () => {
     });
   });
 
-  // ==================== 2. Command Operations ====================
+  // ==================== Command Operations ====================
   describe('Command Operations', () => {
     describe('execute()', () => {
       it('should execute a simple command', async () => {
@@ -215,7 +223,7 @@ describe.skipIf(!shouldRun)('FastGPTSandboxAdapter Integration Tests', () => {
     });
   });
 
-  // ==================== 3. File Operations ====================
+  // ==================== File Operations ====================
   describe('File Operations', () => {
     const testDir = '/tmp/test-files';
     const testFile = `${testDir}/test.txt`;
@@ -422,7 +430,7 @@ describe.skipIf(!shouldRun)('FastGPTSandboxAdapter Integration Tests', () => {
     it('should delete the container', async () => {
       await adapter.delete();
 
-      expect(adapter.status.state).toBe('Deleted');
+      expect(adapter.status.state).toBe('UnExist');
     });
   });
 });

@@ -28,18 +28,6 @@ export interface ISandboxLifecycle {
   stop(): Promise<void>;
 
   /**
-   * Pause a running sandbox.
-   * Not all providers support this.
-   */
-  pause(): Promise<void>;
-
-  /**
-   * Resume a paused sandbox.
-   * Not all providers support this.
-   */
-  resume(): Promise<void>;
-
-  /**
    * Delete the sandbox permanently.
    */
   delete(): Promise<void>;

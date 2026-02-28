@@ -1,6 +1,6 @@
 {
   "name": "@fastgpt-sdk/sandbox-adapter",
-  "version": "0.0.1",
+  "version": "0.0.4",
   "description": "Unified abstraction layer for cloud sandbox providers with adapter pattern and feature polyfilling",
   "type": "module",
   "main": "./dist/index.js",
@@ -46,21 +46,10 @@
   ],
   "author": "",
   "license": "MIT",
-  "peerDependencies": {
-    "@alibaba-group/opensandbox": ">=0.1.0",
-    "@fastgpt-sdk/sandbox-server": ">=0.0.5"
-  },
-  "peerDependenciesMeta": {
-    "@alibaba-group/opensandbox": {
-      "optional": true
-    },
-    "@fastgpt-sdk/sandbox-server": {
-      "optional": true
-    }
+  "dependencies": {
+    "@alibaba-group/opensandbox": "^0.1.3"
   },
   "devDependencies": {
-    "@alibaba-group/opensandbox": "^0.1.3",
-    "@fastgpt-sdk/sandbox-server": "^0.0.5",
     "@eslint/js": "^9.39.2",
     "@types/bun": "latest",
     "@types/node": "^25.2.0",

@@ -1,11 +1,11 @@
 import { ISandbox } from '../interfaces';
-import { FastGPTSandboxAdapter, type FastGPTSandboxConfig } from './FastGPTSandboxAdapter';
+import { SealosDevboxAdapter, type SealosDevboxConfig } from './SealosDevboxAdapter';
 import { MinimalProviderAdapter, type MinimalProviderConfig } from './MinimalProviderAdapter';
 import { OpenSandboxAdapter, type OpenSandboxConnectionConfig } from './OpenSandboxAdapter';
 
 // Re-export adapters and their configs
 export { BaseSandboxAdapter } from './BaseSandboxAdapter';
-export { FastGPTSandboxAdapter, type FastGPTSandboxConfig } from './FastGPTSandboxAdapter';
+export { SealosDevboxAdapter, type SealosDevboxConfig } from './SealosDevboxAdapter';
 export {
   MinimalProviderAdapter,
   type MinimalProviderConfig,
@@ -27,8 +27,8 @@ type CreateProviderType =
       config: MinimalProviderConfig;
     }
   | {
-      provider: 'fastgpt';
-      config: FastGPTSandboxConfig;
+      provider: 'sealos-devbox';
+      config: SealosDevboxConfig;
     };
 
 /**
@@ -46,8 +46,8 @@ export const createSandbox = ({ provider, config }: CreateProviderType): ISandbo
     case 'minimal':
       return new MinimalProviderAdapter(config);
 
-    case 'fastgpt':
-      return new FastGPTSandboxAdapter(config);
+    case 'sealos-devbox':
+      return new SealosDevboxAdapter(config);
 
     default:
       throw new Error(`Unknown provider: ${provider}`);

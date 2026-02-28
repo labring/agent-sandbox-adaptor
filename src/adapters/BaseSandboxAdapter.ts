@@ -37,9 +37,7 @@ export abstract class BaseSandboxAdapter implements ISandbox {
   protected _status: SandboxStatus = { state: 'Creating' };
   protected polyfillService?: CommandPolyfillService;
 
-  constructor() {
-    this.polyfillService = new CommandPolyfillService(this);
-  }
+  constructor() {}
 
   get status(): SandboxStatus {
     return this._status;
@@ -50,11 +48,8 @@ export abstract class BaseSandboxAdapter implements ISandbox {
   abstract create(config: SandboxConfig): Promise<void>;
   abstract start(): Promise<void>;
   abstract stop(): Promise<void>;
-  abstract pause(): Promise<void>;
-  abstract resume(): Promise<void>;
   abstract delete(): Promise<void>;
   abstract getInfo(): Promise<SandboxInfo | null>;
-  abstract close(): Promise<void>;
 
   async waitUntilReady(timeoutMs: number = 120000): Promise<void> {
     const startTime = Date.now();

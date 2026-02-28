@@ -7,15 +7,14 @@ export type SandboxId = string;
  * Sandbox status states.
  */
 export type SandboxState =
-  | 'Creating'
+  | 'UnExist'
   | 'Running'
-  | 'Pausing'
-  | 'Paused'
-  | 'Resuming'
+  | 'Creating'
+  | 'Starting'
+  | 'Stopping'
+  | 'Stopped'
   | 'Deleting'
-  | 'Deleted'
-  | 'Error'
-  | string; // Extensible for provider-specific states
+  | 'Error';
 
 /**
  * Sandbox status information.
