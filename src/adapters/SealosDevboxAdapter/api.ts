@@ -54,7 +54,7 @@ export class DevboxApi {
 
   /** GET /api/v1/devbox/{name} — query devbox info (state + SSH) */
   async info(name: string): Promise<DevboxApiResponse<DevboxInfoData>> {
-    return this.request(this.url(`/api/v1/devbox/${name}`), {
+    return this.request<DevboxInfoData>(this.url(`/api/v1/devbox/${name}`), {
       method: 'GET'
     });
   }

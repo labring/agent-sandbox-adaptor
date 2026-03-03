@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SealosDevboxAdapter, type SealosDevboxConfig } from '@/adapters/SealosDevboxAdapter';
 import type { SandboxConfig } from '@/types';
+import { createHash } from 'crypto';
 
 /**
  * Integration tests for SealosDevboxAdapter.
@@ -17,10 +18,12 @@ const SANDBOX_TOKEN = process.env.SEALOS_DEVBOX_SERVER_TOKEN;
 // Skip all tests if environment variables are not set
 const shouldRun = Boolean(SANDBOX_URL && SANDBOX_TOKEN);
 
+function sha256_16(input: string) {
+  return createHash('sha256').update(input).digest('hex').slice(0, 16);
+}
+
 describe.skipIf(!shouldRun)('SealosDevboxAdapter Integration Tests', () => {
-  let adapter: SealosDevboxAdapter;
-  const randomThreeDigits = Math.floor(100 + Math.random() * 900);
-  const devboxName = `test-${Date.now()}-${randomThreeDigits}`;
+  const devboxName = `test-${sha256_16(Date.now().toString())}`;
 
   const config: SealosDevboxConfig = {
     baseUrl: SANDBOX_URL!,
@@ -31,17 +34,19 @@ describe.skipIf(!shouldRun)('SealosDevboxAdapter Integration Tests', () => {
   const sandboxConfig: SandboxConfig = {
     image: { repository: 'node', tag: '18' }
   };
+  const adapter = new SealosDevboxAdapter(config);
 
   beforeAll(async () => {
-    adapter = new SealosDevboxAdapter(config);
+    await adapter.create(sandboxConfig);
+    expect(adapter.status.state).toBe('Running');
   });
 
   afterAll(async () => {
     // Cleanup: delete the test container
     try {
       await adapter.delete();
-    } catch {
-      // Ignore errors during cleanup
+    } catch (error) {
+      console.error('Error during cleanup', error);
     }
   });
 
@@ -63,12 +68,6 @@ describe.skipIf(!shouldRun)('SealosDevboxAdapter Integration Tests', () => {
     });
 
     describe('create()', () => {
-      it('should create a new container', async () => {
-        await adapter.create(sandboxConfig);
-
-        expect(adapter.status.state).toBe('Running');
-      });
-
       it('should skip creation if container already exists', async () => {
         // Second call should not throw
         await expect(adapter.create(sandboxConfig)).resolves.toBeUndefined();
@@ -130,6 +129,9 @@ describe.skipIf(!shouldRun)('SealosDevboxAdapter Integration Tests', () => {
 
   // ==================== Command Operations ====================
   describe('Command Operations', () => {
+    beforeAll(async () => {
+      await adapter.start();
+    });
     describe('execute()', () => {
       it('should execute a simple command', async () => {
         const result = await adapter.execute('echo "Hello, World!"');
@@ -230,8 +232,10 @@ describe.skipIf(!shouldRun)('SealosDevboxAdapter Integration Tests', () => {
     const testContent = 'Hello, FastGPT!';
 
     beforeAll(async () => {
-      // Create test directory
-      await adapter.createDirectories([testDir]);
+      await adapter.start();
+      // Create test directory and clean up any existing test files
+      await adapter.execute(`mkdir -p ${testDir}`);
+      await adapter.execute(`rm -rf ${testDir}/test-*`);
     });
 
     afterAll(async () => {
@@ -243,79 +247,304 @@ describe.skipIf(!shouldRun)('SealosDevboxAdapter Integration Tests', () => {
       }
     });
 
+    // ===== writeFiles Tests =====
     describe('writeFiles()', () => {
-      it('should write string content to file', async () => {
+      it('should write single file with string content', async () => {
         const results = await adapter.writeFiles([{ path: testFile, data: testContent }]);
 
         expect(results).toHaveLength(1);
+        expect(results[0].path).toBe(testFile);
         expect(results[0].error).toBeNull();
         expect(results[0].bytesWritten).toBeGreaterThan(0);
-      });
 
-      it('should write binary content to file', async () => {
-        const binaryData = new Uint8Array([0x48, 0x65, 0x6c, 0x6c, 0x6f]); // "Hello"
-        const results = await adapter.writeFiles([
-          { path: `${testDir}/binary.bin`, data: binaryData }
-        ]);
-
-        expect(results[0].error).toBeNull();
-        expect(results[0].bytesWritten).toBe(5);
-      });
-
-      it('should write multiple files', async () => {
-        const results = await adapter.writeFiles([
-          { path: `${testDir}/file1.txt`, data: 'content1' },
-          { path: `${testDir}/file2.txt`, data: 'content2' }
-        ]);
-
-        expect(results).toHaveLength(2);
-        expect(results.every((r) => r.error === null)).toBe(true);
-      });
-    });
-
-    describe('readFiles()', () => {
-      it('should read file content', async () => {
-        const results = await adapter.readFiles([testFile]);
-
-        expect(results).toHaveLength(1);
-        expect(results[0].error).toBeNull();
-
-        const content = new TextDecoder().decode(results[0].content);
-        // Polyfill may add trailing newline, use trim() for comparison
+        // Verify file content
+        const readResults = await adapter.readFiles([testFile]);
+        const content = new TextDecoder().decode(readResults[0].content);
         expect(content.trim()).toBe(testContent);
       });
 
-      it('should handle non-existent file', async () => {
-        const results = await adapter.readFiles([`${testDir}/nonexistent.txt`]);
+      it('should write multiple files in batch', async () => {
+        const files = [
+          { path: `${testDir}/test-multi1.txt`, data: 'Content 1' },
+          { path: `${testDir}/test-multi2.txt`, data: 'Content 2' },
+          { path: `${testDir}/test-multi3.txt`, data: 'Content 3' }
+        ];
+
+        const results = await adapter.writeFiles(files);
+
+        expect(results).toHaveLength(3);
+        results.forEach((result) => {
+          expect(result.error).toBeNull();
+          expect(result.bytesWritten).toBeGreaterThan(0);
+        });
+
+        // Verify all files were created
+        const entries = await adapter.listDirectory(testDir);
+        expect(entries.some((e) => e.name === 'test-multi1.txt')).toBe(true);
+        expect(entries.some((e) => e.name === 'test-multi2.txt')).toBe(true);
+        expect(entries.some((e) => e.name === 'test-multi3.txt')).toBe(true);
+      });
+
+      it('should overwrite existing file', async () => {
+        const path = `${testDir}/test-overwrite.txt`;
+
+        // First write
+        await adapter.writeFiles([{ path, data: 'Original content' }]);
+
+        // Second write (overwrite)
+        await adapter.writeFiles([{ path, data: 'New content' }]);
+
+        // Verify content was overwritten
+        const results = await adapter.readFiles([path]);
+        const content = new TextDecoder().decode(results[0].content);
+        expect(content.trim()).toBe('New content');
+        expect(content).not.toContain('Original');
+      });
+
+      it('should write UTF-8 encoded content', async () => {
+        const utf8Content = '中文测试 Hello 🚀';
+        const path = `${testDir}/test-utf8.txt`;
+
+        const results = await adapter.writeFiles([{ path, data: utf8Content }]);
+
+        expect(results[0].error).toBeNull();
+
+        // Verify UTF-8 content
+        const readResults = await adapter.readFiles([path]);
+        const content = new TextDecoder().decode(readResults[0].content);
+        expect(content.trim()).toBe(utf8Content);
+      });
+
+      it('should write binary content (Uint8Array)', async () => {
+        const binaryData = new Uint8Array([0x48, 0x65, 0x6c, 0x6c, 0x6f]); // "Hello"
+        const path = `${testDir}/test-binary.bin`;
+
+        const results = await adapter.writeFiles([{ path, data: binaryData }]);
+
+        expect(results[0].error).toBeNull();
+        expect(results[0].bytesWritten).toBe(5);
+
+        // Verify binary content
+        const readResults = await adapter.readFiles([path]);
+        const content = new TextDecoder().decode(readResults[0].content);
+        expect(content.trim()).toBe('Hello');
+      });
+
+      it('should write large file content', async () => {
+        const largeContent = 'x'.repeat(1024 * 100); // 100KB
+        const path = `${testDir}/test-large.txt`;
+
+        const results = await adapter.writeFiles([{ path, data: largeContent }]);
+
+        expect(results[0].error).toBeNull();
+        expect(results[0].bytesWritten).toBeGreaterThan(1024 * 100 * 0.9);
+      });
+
+      it('should write empty file', async () => {
+        const path = `${testDir}/test-empty.txt`;
+
+        const results = await adapter.writeFiles([{ path, data: '' }]);
+
+        expect(results[0].error).toBeNull();
+
+        // Verify file exists but is empty
+        const readResults = await adapter.readFiles([path]);
+        expect(readResults[0].content.length).toBeLessThanOrEqual(1); // May have newline
+      });
+
+      it('should handle special characters in content', async () => {
+        const specialContent = 'Line1\nLine2\tTabbed\r\nWindows';
+        const path = `${testDir}/test-special.txt`;
+
+        const results = await adapter.writeFiles([{ path, data: specialContent }]);
+
+        expect(results[0].error).toBeNull();
+
+        // Verify special characters preserved
+        const readResults = await adapter.readFiles([path]);
+        const content = new TextDecoder().decode(readResults[0].content);
+        expect(content).toContain('Line1');
+        expect(content).toContain('Line2');
+      });
+    });
+
+    // ===== readFiles Tests =====
+    describe('readFiles()', () => {
+      it('should read single file content', async () => {
+        const content = 'Hello, Sandbox!';
+        await adapter.writeFiles([{ path: `${testDir}/test-read.txt`, data: content }]);
+
+        const results = await adapter.readFiles([`${testDir}/test-read.txt`]);
 
         expect(results).toHaveLength(1);
-        // Polyfill returns empty content for non-existent file (no error thrown)
-        // Check either error is set OR content is empty
+        expect(results[0].path).toBe(`${testDir}/test-read.txt`);
+        expect(results[0].error).toBeNull();
+        expect(results[0].content).toBeDefined();
+
+        const text = new TextDecoder().decode(results[0].content);
+        expect(text.trim()).toBe(content);
+      });
+
+      it('should read multiple files in batch', async () => {
+        await adapter.writeFiles([
+          { path: `${testDir}/test-batch1.txt`, data: 'file1' },
+          { path: `${testDir}/test-batch2.txt`, data: 'file2' },
+          { path: `${testDir}/test-batch3.txt`, data: 'file3' }
+        ]);
+
+        const results = await adapter.readFiles([
+          `${testDir}/test-batch1.txt`,
+          `${testDir}/test-batch2.txt`,
+          `${testDir}/test-batch3.txt`
+        ]);
+
+        expect(results).toHaveLength(3);
+        results.forEach((result, index) => {
+          expect(result.error).toBeNull();
+          const text = new TextDecoder().decode(result.content);
+          expect(text.trim()).toBe(`file${index + 1}`);
+        });
+      });
+
+      it('should handle UTF-8 encoded content', async () => {
+        const utf8Content = '你好世界 Hello 🌍';
+        await adapter.writeFiles([{ path: `${testDir}/test-utf8-read.txt`, data: utf8Content }]);
+
+        const results = await adapter.readFiles([`${testDir}/test-utf8-read.txt`]);
+        const text = new TextDecoder().decode(results[0].content);
+
+        expect(text.trim()).toContain('你好世界');
+        expect(text.trim()).toContain('Hello');
+        expect(text.trim()).toContain('🌍');
+      });
+
+      it('should handle large file content', async () => {
+        const largeContent = 'A'.repeat(1024 * 100); // 100KB
+        await adapter.writeFiles([{ path: `${testDir}/test-large-read.txt`, data: largeContent }]);
+
+        const results = await adapter.readFiles([`${testDir}/test-large-read.txt`]);
+
+        expect(results[0].error).toBeNull();
+        expect(results[0].content.length).toBeGreaterThan(1024 * 100 * 0.9);
+      });
+
+      it('should return error for non-existent file', async () => {
+        const results = await adapter.readFiles([`${testDir}/non-existent.txt`]);
+
+        expect(results).toHaveLength(1);
+        expect(results[0].path).toBe(`${testDir}/non-existent.txt`);
+        // Either error is set OR content is empty (implementation dependent)
         const hasError = results[0].error !== null;
         const isEmpty = results[0].content.length === 0;
         expect(hasError || isEmpty).toBe(true);
       });
 
-      it('should read multiple files', async () => {
-        const results = await adapter.readFiles([`${testDir}/file1.txt`, `${testDir}/file2.txt`]);
+      it('should handle mixed success and failure', async () => {
+        await adapter.writeFiles([{ path: `${testDir}/test-exists.txt`, data: 'exists' }]);
+
+        const results = await adapter.readFiles([
+          `${testDir}/test-exists.txt`,
+          `${testDir}/non-existent.txt`
+        ]);
 
         expect(results).toHaveLength(2);
+        expect(results[0].error).toBeNull();
+        // Second file should have error or be empty
+        const hasError = results[1].error !== null;
+        const isEmpty = results[1].content.length === 0;
+        expect(hasError || isEmpty).toBe(true);
+      });
+
+      it('should read empty file', async () => {
+        await adapter.writeFiles([{ path: `${testDir}/test-empty-read.txt`, data: '' }]);
+
+        const results = await adapter.readFiles([`${testDir}/test-empty-read.txt`]);
+
+        expect(results[0].error).toBeNull();
+        expect(results[0].content.length).toBeLessThanOrEqual(1); // May have newline
+      });
+
+      it('should handle special characters in content', async () => {
+        const specialContent = 'Line1\nLine2\tTabbed\r\nWindows';
+        await adapter.writeFiles([
+          { path: `${testDir}/test-special-read.txt`, data: specialContent }
+        ]);
+
+        const results = await adapter.readFiles([`${testDir}/test-special-read.txt`]);
+        const text = new TextDecoder().decode(results[0].content);
+
+        expect(text).toContain('Line1');
+        expect(text).toContain('Line2');
       });
     });
 
+    // ===== listDirectory Tests =====
     describe('listDirectory()', () => {
-      it('should list directory contents', async () => {
+      it('should list files and directories', async () => {
+        // Create test files and directories
+        await adapter.execute(`touch ${testDir}/test-list-file.txt`);
+        await adapter.execute(`mkdir -p ${testDir}/test-list-subdir`);
+        await adapter.execute(`touch ${testDir}/test-list-subdir/nested.txt`);
+
         const entries = await adapter.listDirectory(testDir);
 
+        expect(entries).toBeDefined();
+        expect(Array.isArray(entries)).toBe(true);
         expect(entries.length).toBeGreaterThan(0);
-        expect(entries.some((e) => e.name === 'test.txt')).toBe(true);
+
+        // Verify file
+        const file = entries.find((e) => e.name === 'test-list-file.txt');
+        expect(file).toBeDefined();
+        expect(file?.isFile).toBe(true);
+        expect(file?.isDirectory).toBe(false);
+        expect(file?.path).toBe(`${testDir}/test-list-file.txt`);
+
+        // Verify directory
+        const dir = entries.find((e) => e.name === 'test-list-subdir');
+        expect(dir).toBeDefined();
+        expect(dir?.isDirectory).toBe(true);
+        expect(dir?.isFile).toBe(false);
+        expect(dir?.path).toBe(`${testDir}/test-list-subdir`);
+      });
+
+      it('should list nested directory contents', async () => {
+        await adapter.execute(`mkdir -p ${testDir}/test-nested/sub1/sub2`);
+        await adapter.execute(`touch ${testDir}/test-nested/sub1/file1.txt`);
+        await adapter.execute(`touch ${testDir}/test-nested/sub1/sub2/file2.txt`);
+
+        const entries = await adapter.listDirectory(`${testDir}/test-nested/sub1`);
+
+        expect(entries).toBeDefined();
+        const file = entries.find((e) => e.name === 'file1.txt');
+        const subdir = entries.find((e) => e.name === 'sub2');
+
+        expect(file?.isFile).toBe(true);
+        expect(subdir?.isDirectory).toBe(true);
       });
 
       it('should return empty array for empty directory', async () => {
-        await adapter.createDirectories([`${testDir}/empty`]);
-        const entries = await adapter.listDirectory(`${testDir}/empty`);
+        await adapter.execute(`mkdir -p ${testDir}/test-empty-dir`);
 
-        expect(entries).toEqual([]);
+        const entries = await adapter.listDirectory(`${testDir}/test-empty-dir`);
+
+        expect(entries).toBeDefined();
+        expect(Array.isArray(entries)).toBe(true);
+        expect(entries.length).toBe(0);
+      });
+
+      it('should handle non-existent directory', async () => {
+        await expect(adapter.listDirectory(`${testDir}/non-existent-dir`)).rejects.toThrow();
+      });
+
+      it('should include file size information', async () => {
+        await adapter.execute(`echo "test content" > ${testDir}/test-size.txt`);
+
+        const entries = await adapter.listDirectory(testDir);
+        const file = entries.find((e) => e.name === 'test-size.txt');
+
+        expect(file).toBeDefined();
+        expect(file?.size).toBeDefined();
+        expect(file?.size).toBeGreaterThan(0);
       });
     });
 
@@ -421,6 +650,126 @@ describe.skipIf(!shouldRun)('SealosDevboxAdapter Integration Tests', () => {
         expect(metrics.cpuCount).toBeGreaterThan(0);
         expect(metrics.memoryTotalMiB).toBeGreaterThan(0);
         expect(metrics.timestamp).toBeGreaterThan(0);
+      });
+    });
+
+    // ===== Integrated Scenarios =====
+    describe('Integrated Scenarios', () => {
+      it('should support complete file lifecycle: create -> read -> modify -> read', async () => {
+        const path = `${testDir}/test-lifecycle.txt`;
+
+        // 1. Create file
+        await adapter.writeFiles([{ path, data: 'Initial content' }]);
+
+        // 2. Read file
+        let results = await adapter.readFiles([path]);
+        let text = new TextDecoder().decode(results[0].content);
+        expect(text.trim()).toBe('Initial content');
+
+        // 3. Modify file
+        await adapter.writeFiles([{ path, data: 'Modified content' }]);
+
+        // 4. Read again
+        results = await adapter.readFiles([path]);
+        text = new TextDecoder().decode(results[0].content);
+        expect(text.trim()).toBe('Modified content');
+      });
+
+      it('should support directory tree operations', async () => {
+        // Create directory structure
+        await adapter.execute(`mkdir -p ${testDir}/test-tree/dir1/subdir1`);
+        await adapter.execute(`mkdir -p ${testDir}/test-tree/dir2`);
+
+        // Write files
+        await adapter.writeFiles([
+          { path: `${testDir}/test-tree/root.txt`, data: 'Root file' },
+          { path: `${testDir}/test-tree/dir1/file1.txt`, data: 'File 1' },
+          { path: `${testDir}/test-tree/dir1/subdir1/file2.txt`, data: 'File 2' },
+          { path: `${testDir}/test-tree/dir2/file3.txt`, data: 'File 3' }
+        ]);
+
+        // List root directory
+        const rootEntries = await adapter.listDirectory(`${testDir}/test-tree`);
+        expect(rootEntries.find((e) => e.name === 'root.txt')).toBeDefined();
+        expect(rootEntries.find((e) => e.name === 'dir1')).toBeDefined();
+        expect(rootEntries.find((e) => e.name === 'dir2')).toBeDefined();
+
+        // List subdirectory
+        const dir1Entries = await adapter.listDirectory(`${testDir}/test-tree/dir1`);
+        expect(dir1Entries.find((e) => e.name === 'file1.txt')).toBeDefined();
+        expect(dir1Entries.find((e) => e.name === 'subdir1')).toBeDefined();
+
+        // Read all files
+        const readResults = await adapter.readFiles([
+          `${testDir}/test-tree/root.txt`,
+          `${testDir}/test-tree/dir1/file1.txt`,
+          `${testDir}/test-tree/dir1/subdir1/file2.txt`,
+          `${testDir}/test-tree/dir2/file3.txt`
+        ]);
+
+        expect(readResults.every((r) => r.error === null)).toBe(true);
+      });
+
+      it('should handle concurrent file operations', async () => {
+        const operations = Array.from({ length: 5 }, (_, i) => ({
+          path: `${testDir}/test-concurrent-${i}.txt`,
+          data: `Content ${i}`
+        }));
+
+        // Concurrent writes
+        await Promise.all(operations.map((op) => adapter.writeFiles([op])));
+
+        // Concurrent reads
+        const paths = operations.map((op) => op.path);
+        const results = await adapter.readFiles(paths);
+
+        expect(results.length).toBe(5);
+        results.forEach((result, i) => {
+          expect(result.error).toBeNull();
+          const text = new TextDecoder().decode(result.content);
+          expect(text.trim()).toBe(`Content ${i}`);
+        });
+      });
+
+      it('should maintain file integrity across operations', async () => {
+        const path = `${testDir}/test-integrity.txt`;
+        const content = 'A'.repeat(10000); // 10KB
+
+        // Write large file
+        await adapter.writeFiles([{ path, data: content }]);
+
+        // Multiple reads to verify consistency
+        for (let i = 0; i < 3; i++) {
+          const results = await adapter.readFiles([path]);
+          const text = new TextDecoder().decode(results[0].content);
+          expect(text.trim()).toBe(content);
+          expect(text.trim().length).toBe(10000);
+        }
+      });
+    });
+
+    // ===== Error Handling =====
+    describe('Error Handling', () => {
+      it('should handle invalid file paths', async () => {
+        const results = await adapter.readFiles(['']);
+        // Either error is set OR content is empty
+        const hasError = results[0].error !== null;
+        const isEmpty = results[0].content.length === 0;
+        expect(hasError || isEmpty).toBe(true);
+      });
+
+      it('should handle mixed batch operations with errors', async () => {
+        await adapter.execute(`mkdir -p ${testDir}/test-mixed`);
+        await adapter.execute(`touch ${testDir}/test-mixed/exists.txt`);
+
+        const results = await adapter.writeFiles([
+          { path: `${testDir}/test-mixed/new1.txt`, data: 'New 1' },
+          { path: `${testDir}/test-mixed/exists.txt`, data: 'Overwrite' },
+          { path: `${testDir}/test-mixed/new2.txt`, data: 'New 2' }
+        ]);
+
+        // All should succeed (overwrite is allowed)
+        expect(results.every((r) => r.error === null)).toBe(true);
       });
     });
   });

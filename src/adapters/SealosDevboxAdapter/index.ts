@@ -197,6 +197,10 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
         timeoutSeconds: options?.timeoutMs ? Math.ceil(options.timeoutMs / 1000) : undefined
       });
 
+      if (!res.data) {
+        throw new CommandExecutionError(`Command execution failed: ${command}`, command);
+      }
+
       return {
         stdout: res.data.stdout,
         stderr: res.data.stderr,
