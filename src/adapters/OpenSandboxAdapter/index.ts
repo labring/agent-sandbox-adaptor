@@ -4,21 +4,23 @@ import {
   ConnectionError,
   FeatureNotSupportedError,
   SandboxStateError
-} from '../errors';
+} from '../../errors';
 import type {
   ExecuteOptions,
   ExecuteResult,
   ImageSpec,
   ResourceLimits,
-  SandboxConfig,
   SandboxId,
   SandboxInfo,
   SandboxMetrics,
   SandboxState,
   SandboxStatus,
   StreamHandlers
-} from '../types';
-import { BaseSandboxAdapter } from './BaseSandboxAdapter';
+} from '@/types';
+import { BaseSandboxAdapter } from '../BaseSandboxAdapter';
+import type { OpenSandboxConfigType } from './type';
+
+export type { OpenSandboxConfigType } from './type';
 
 /**
  * Sandbox runtime type.
@@ -70,7 +72,10 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
   private _connection: ConnectionConfig;
   private _id: SandboxId = '';
 
-  constructor(private connectionConfig: OpenSandboxConnectionConfig = {}) {
+  constructor(
+    private connectionConfig: OpenSandboxConnectionConfig = {},
+    private createConfig: OpenSandboxConfigType
+  ) {
     super();
     this.runtime = connectionConfig.runtime ?? 'docker';
     this._connection = this.createConnectionConfig();
@@ -209,21 +214,24 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
 
   // ==================== Lifecycle Methods ====================
 
-  async create(config: SandboxConfig): Promise<void> {
+  async ensureRunning(): Promise<void> {
+    return this.create();
+  }
+  async create(): Promise<void> {
     try {
       this._status = { state: 'Creating' };
 
-      const image = this.convertImageSpec(config.image);
-      const resource = this.convertResourceLimits(config.resourceLimits);
+      const image = this.convertImageSpec(this.createConfig.image);
+      const resource = this.convertResourceLimits(this.createConfig.resourceLimits);
 
       this._sandbox = await Sandbox.create({
         connectionConfig: this._connection,
         image,
-        entrypoint: config.entrypoint,
-        timeoutSeconds: config.timeout,
+        entrypoint: this.createConfig.entrypoint,
+        timeoutSeconds: this.createConfig.timeout,
         resource,
-        env: config.env,
-        metadata: config.metadata
+        env: this.createConfig.env,
+        metadata: this.createConfig.metadata
       });
 
       this._id = this._sandbox.id;

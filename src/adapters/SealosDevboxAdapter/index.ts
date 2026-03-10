@@ -3,7 +3,6 @@ import { CommandExecutionError, ConnectionError, TimeoutError } from '../../erro
 import type {
   ExecuteOptions,
   ExecuteResult,
-  SandboxConfig,
   SandboxId,
   SandboxInfo,
   SandboxState
@@ -11,6 +10,7 @@ import type {
 import { BaseSandboxAdapter } from '../BaseSandboxAdapter';
 import { DevboxApi } from './api';
 import { DevboxPhaseEnum, type DevboxInfoData } from './type';
+import path from 'node:path';
 
 /**
  * Configuration for Sealos Devbox Adapter.
@@ -24,7 +24,7 @@ export interface SealosDevboxConfig {
 }
 
 export class SealosDevboxAdapter extends BaseSandboxAdapter {
-  readonly provider = 'sealos-devbox' as const;
+  readonly provider = 'sealosdevbox' as const;
 
   private api: DevboxApi;
   private _id: SandboxId;
@@ -100,11 +100,7 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
     }
   }
 
-  /*  
-    创建可用沙盒
-    Devbox 是不销毁模式，所以这里需要判断沙盒状态，确保其正常启用。
-  */
-  async create(_config: SandboxConfig): Promise<void> {
+  async ensureRunning(): Promise<void> {
     try {
       const sandbox = await this.getInfo();
       if (sandbox) {
@@ -122,16 +118,28 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
             return;
           case 'Deleting':
             await this.waitUntilDeleted();
+            await this.create();
+            return;
           default:
             throw new ConnectionError(
-              `Failed to create sandbox: ${status}, ${sandbox.status.message}`
+              `Failed to ensure sandbox running: ${status}, ${sandbox.status.message}`
             );
         }
       }
 
+      // Not found, create sandbox
+      await this.create();
+    } catch (error) {
+      throw new ConnectionError('Failed to ensure sandbox running', this.config.baseUrl, error);
+    }
+  }
+  /*  
+    创建可用沙盒
+  */
+  async create(): Promise<void> {
+    try {
       this._status = { state: 'Creating' };
       await this.api.create(this._id);
-      await this.waitUntilReady();
       this._status = { state: 'Running' };
     } catch (error) {
       throw new ConnectionError('Failed to create sandbox', this.config.baseUrl, error);
@@ -186,11 +194,11 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
 
   async execute(command: string, options?: ExecuteOptions): Promise<ExecuteResult> {
     try {
-      await this.waitUntilReady();
-
-      const cmd = options?.workingDirectory
-        ? ['sh', '-lc', `cd ${options.workingDirectory} && ${command}`]
-        : ['sh', '-lc', command];
+      const baseWorkingDirectory = '/home/devbox';
+      const workingDirectory = options?.workingDirectory
+        ? path.join(baseWorkingDirectory, options.workingDirectory)
+        : baseWorkingDirectory;
+      const cmd = ['sh', '-lc', `cd ${workingDirectory} && ${command}`];
 
       const res = await this.api.exec(this._id, {
         command: cmd,

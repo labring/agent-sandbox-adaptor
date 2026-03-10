@@ -3,13 +3,14 @@ import { FeatureNotSupportedError, SandboxReadyTimeoutError } from '@/errors';
 import { BaseSandboxAdapter } from '@/adapters/BaseSandboxAdapter';
 import { CommandPolyfillService } from '@/polyfill/CommandPolyfillService';
 import { MockSandboxAdapter } from '../../mocks/MockSandboxAdapter';
-import type { ExecuteResult, SandboxConfig, SandboxInfo } from '@/types';
+import type { ExecuteResult, SandboxInfo } from '@/types';
 
 class FallbackAdapter extends BaseSandboxAdapter {
   readonly id = 'fallback-id';
   readonly provider = 'fallback';
 
-  async create(_config: SandboxConfig): Promise<void> {}
+  async ensureRunning(): Promise<void> {}
+  async create(): Promise<void> {}
   async start(): Promise<void> {}
   async stop(): Promise<void> {}
   async delete(): Promise<void> {}
@@ -57,7 +58,8 @@ class PolyfillTestAdapter extends BaseSandboxAdapter {
     this.polyfillService = new CommandPolyfillService(this);
   }
 
-  async create(_config: SandboxConfig): Promise<void> {}
+  async ensureRunning(): Promise<void> {}
+  async create(): Promise<void> {}
   async start(): Promise<void> {}
   async stop(): Promise<void> {}
   async delete(): Promise<void> {}

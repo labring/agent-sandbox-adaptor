@@ -13,7 +13,6 @@ import type {
   MoveEntry,
   PermissionEntry,
   ReadFileOptions,
-  SandboxConfig,
   SandboxId,
   SandboxInfo,
   SandboxMetrics,
@@ -31,7 +30,7 @@ export interface MockSandboxAdapterOptions {
  * Mock adapter for testing the base class behavior.
  * Provides in-memory filesystem and command execution.
  */
-export class MockSandboxAdapter extends BaseSandboxAdapter {
+export class MockSandboxAdapter extends BaseSandboxAdapter<unknown> {
   readonly provider = 'mock';
 
   _id: SandboxId = 'mock-sandbox-id';
@@ -74,7 +73,10 @@ export class MockSandboxAdapter extends BaseSandboxAdapter {
   }
 
   // Lifecycle methods (stubs)
-  async create(_config: SandboxConfig): Promise<void> {
+  async ensureRunning(_config: unknown): Promise<void> {
+    return this.create(_config);
+  }
+  async create(_config: unknown): Promise<void> {
     this._status = { state: 'Running' };
   }
 

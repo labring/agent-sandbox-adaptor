@@ -14,7 +14,6 @@ import type {
   MoveEntry,
   PermissionEntry,
   ReadFileOptions,
-  SandboxConfig,
   SandboxId,
   SandboxInfo,
   SandboxMetrics,
@@ -45,7 +44,8 @@ export abstract class BaseSandboxAdapter implements ISandbox {
 
   // ==================== Lifecycle Methods ====================
 
-  abstract create(config: SandboxConfig): Promise<void>;
+  abstract ensureRunning(): Promise<void>;
+  abstract create(): Promise<void>;
   abstract start(): Promise<void>;
   abstract stop(): Promise<void>;
   abstract delete(): Promise<void>;

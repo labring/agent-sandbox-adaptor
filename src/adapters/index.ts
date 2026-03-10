@@ -1,55 +1,51 @@
-import { ISandbox } from '../interfaces';
 import { SealosDevboxAdapter, type SealosDevboxConfig } from './SealosDevboxAdapter';
-import { MinimalProviderAdapter, type MinimalProviderConfig } from './MinimalProviderAdapter';
-import { OpenSandboxAdapter, type OpenSandboxConnectionConfig } from './OpenSandboxAdapter';
-
-// Re-export adapters and their configs
-export { BaseSandboxAdapter } from './BaseSandboxAdapter';
-export { SealosDevboxAdapter, type SealosDevboxConfig } from './SealosDevboxAdapter';
-export {
-  MinimalProviderAdapter,
-  type MinimalProviderConfig,
-  type MinimalProviderConnection
-} from './MinimalProviderAdapter';
-export {
+import {
   OpenSandboxAdapter,
   type OpenSandboxConnectionConfig,
-  type SandboxRuntimeType
+  type OpenSandboxConfigType
 } from './OpenSandboxAdapter';
+import { ISandbox } from '@/interfaces';
 
-type CreateProviderType =
-  | {
-      provider: 'opensandbox';
-      config: OpenSandboxConnectionConfig;
-    }
-  | {
-      provider: 'minimal';
-      config: MinimalProviderConfig;
-    }
-  | {
-      provider: 'sealos-devbox';
-      config: SealosDevboxConfig;
-    };
+export type SandboxProviderType = 'opensandbox' | 'sealosdevbox';
+
+/** Maps each provider name to the ISandbox config type it exposes. */
+interface SandboxConfigMap {
+  opensandbox: OpenSandboxConfigType;
+  sealosdevbox: undefined;
+}
+
+/** Resolves the concrete ISandbox type for a given provider. */
+
+/** Maps each provider name to its constructor (connection) config type. */
+interface SandboxConnectionConfig {
+  opensandbox: OpenSandboxConnectionConfig;
+  sealosdevbox: SealosDevboxConfig;
+}
 
 /**
  * Create a sandbox provider instance.
+ * The return type is inferred from the provider name.
  *
  * @param config Provider configuration
  * @returns Configured sandbox instance
  * @throws Error if provider type is unknown
  */
-export const createSandbox = ({ provider, config }: CreateProviderType): ISandbox => {
+export function createSandbox<P extends SandboxProviderType>(
+  provider: P,
+  config: SandboxConnectionConfig[P],
+  createConfig: SandboxConfigMap[P]
+): ISandbox {
   switch (provider) {
     case 'opensandbox':
-      return new OpenSandboxAdapter(config);
+      return new OpenSandboxAdapter(
+        config as OpenSandboxConnectionConfig,
+        createConfig as OpenSandboxConfigType
+      );
 
-    case 'minimal':
-      return new MinimalProviderAdapter(config);
-
-    case 'sealos-devbox':
-      return new SealosDevboxAdapter(config);
+    case 'sealosdevbox':
+      return new SealosDevboxAdapter(config as SealosDevboxConfig);
 
     default:
       throw new Error(`Unknown provider: ${provider}`);
   }
-};
+}

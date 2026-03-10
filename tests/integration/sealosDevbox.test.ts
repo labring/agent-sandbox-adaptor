@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SealosDevboxAdapter, type SealosDevboxConfig } from '@/adapters/SealosDevboxAdapter';
-import type { SandboxConfig } from '@/types';
 import { createHash } from 'crypto';
 
 /**
@@ -31,13 +30,10 @@ describe.skipIf(!shouldRun)('SealosDevboxAdapter Integration Tests', () => {
     sandboxId: devboxName
   };
 
-  const sandboxConfig: SandboxConfig = {
-    image: { repository: 'node', tag: '18' }
-  };
   const adapter = new SealosDevboxAdapter(config);
 
   beforeAll(async () => {
-    await adapter.create(sandboxConfig);
+    await adapter.ensureRunning();
     expect(adapter.status.state).toBe('Running');
   });
 
@@ -53,7 +49,7 @@ describe.skipIf(!shouldRun)('SealosDevboxAdapter Integration Tests', () => {
   // 基本测试
   describe('Basic Tests', () => {
     it('should initialize with correct values', () => {
-      expect(adapter.provider).toBe('sealos-devbox');
+      expect(adapter.provider).toBe('sealosdevbox');
       expect(adapter.id).toBe(devboxName);
     });
   });
@@ -62,15 +58,44 @@ describe.skipIf(!shouldRun)('SealosDevboxAdapter Integration Tests', () => {
   describe('Container Lifecycle Operations', () => {
     describe('initialization', () => {
       it('should initialize with correct values', () => {
-        expect(adapter.provider).toBe('sealos-devbox');
+        expect(adapter.provider).toBe('sealosdevbox');
         expect(adapter.id).toBe(devboxName);
       });
     });
 
     describe('create()', () => {
-      it('should skip creation if container already exists', async () => {
-        // Second call should not throw
-        await expect(adapter.create(sandboxConfig)).resolves.toBeUndefined();
+      it('should handle creation when sandbox already exists', async () => {
+        // Attempting to create again may throw or succeed depending on implementation
+        // The current implementation doesn't check existence before creating
+        await expect(adapter.create()).resolves.toBeUndefined();
+      });
+    });
+
+    describe('ensureRunning()', () => {
+      it('should return immediately when sandbox is already running', async () => {
+        // Sandbox is running from beforeAll
+        await expect(adapter.ensureRunning()).resolves.toBeUndefined();
+        expect(adapter.status.state).toBe('Running');
+      });
+
+      it('should start sandbox when it is stopped', async () => {
+        // Stop the sandbox first
+        await adapter.stop();
+        expect(adapter.status.state).toBe('Stopped');
+
+        // ensureRunning should start it
+        await adapter.ensureRunning();
+        expect(adapter.status.state).toBe('Running');
+      });
+
+      it('should wait and verify sandbox is running', async () => {
+        // Ensure sandbox is running
+        await adapter.ensureRunning();
+
+        // Verify it's actually running by executing a command
+        const result = await adapter.execute('echo "test"');
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout.trim()).toBe('test');
       });
     });
 

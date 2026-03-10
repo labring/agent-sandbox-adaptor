@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { OpenSandboxAdapter } from '@/adapters/OpenSandboxAdapter';
 import { ConnectionError, SandboxStateError } from '@/errors';
-import type { ImageSpec, ResourceLimits, SandboxConfig } from '@/types';
+import type { ImageSpec, ResourceLimits } from '@/types';
+import type { OpenSandboxConfigType } from '@/adapters/OpenSandboxAdapter/type';
 
 /**
  * Unit tests for OpenSandboxAdapter.
@@ -42,7 +43,7 @@ describe('OpenSandboxAdapter', () => {
         baseUrl: 'http://localhost:65530'
       });
 
-      const config: SandboxConfig = {
+      const config: OpenSandboxConfigType = {
         image: { repository: 'nginx', tag: 'latest' }
       };
 
@@ -210,7 +211,7 @@ describe('OpenSandboxAdapter', () => {
     it('should handle SandboxConfig with all options', () => {
       const _adapter = new OpenSandboxAdapter();
 
-      const fullConfig: SandboxConfig = {
+      const fullConfig: OpenSandboxConfigType = {
         image: { repository: 'node', tag: '18-alpine' },
         entrypoint: ['node', 'app.js'],
         timeout: 3600,
@@ -230,7 +231,7 @@ describe('OpenSandboxAdapter', () => {
     });
 
     it('should handle minimal SandboxConfig', () => {
-      const minimalConfig: SandboxConfig = {
+      const minimalConfig: OpenSandboxConfigType = {
         image: { repository: 'alpine' }
       };
 

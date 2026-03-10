@@ -26,7 +26,6 @@ export type {
   ImageSpec,
   NetworkPolicy,
   ResourceLimits,
-  SandboxConfig,
   SandboxId,
   SandboxInfo,
   SandboxMetrics,

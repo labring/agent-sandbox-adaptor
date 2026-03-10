@@ -1,4 +1,4 @@
-import type { SandboxConfig, SandboxId, SandboxInfo, SandboxStatus } from '../types';
+import type { SandboxId, SandboxInfo, SandboxStatus } from '../types';
 
 /**
  * Interface for sandbox lifecycle operations.
@@ -12,10 +12,15 @@ export interface ISandboxLifecycle {
   readonly status: SandboxStatus;
 
   /**
+   * Ensure the sandbox is running.
+   */
+  ensureRunning(): Promise<void>;
+
+  /**
    * Create a new sandbox with the given configuration.
    * The sandbox ID is assigned after creation.
    */
-  create(config: SandboxConfig): Promise<void>;
+  create(): Promise<void>;
 
   /**
    * Start a stopped sandbox.
