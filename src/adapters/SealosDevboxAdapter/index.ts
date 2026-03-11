@@ -194,8 +194,8 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
 
   async execute(command: string, options?: ExecuteOptions): Promise<ExecuteResult> {
     const cmd = options?.workingDirectory
-      ? ['sh', '-lc', `cd ${options.workingDirectory} && ${command}`]
-      : ['sh', '-lc', command];
+      ? [`cd ${options.workingDirectory} && ${command}`]
+      : [command];
 
     try {
       const res = await this.api.exec(this._id, {

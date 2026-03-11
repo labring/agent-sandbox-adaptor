@@ -17,7 +17,7 @@ const SANDBOX_TOKEN = process.env.SEALOS_DEVBOX_SERVER_TOKEN;
 // Skip all tests if environment variables are not set
 const shouldRun = Boolean(SANDBOX_URL && SANDBOX_TOKEN);
 
-describe.skipIf(!shouldRun)('SealosDevboxAdapter Integration Tests', () => {
+describe.skipIf(!shouldRun).sequential('SealosDevboxAdapter Integration Tests', () => {
   const devboxName = `test-devbox`;
 
   const config: SealosDevboxConfig = {
@@ -31,8 +31,6 @@ describe.skipIf(!shouldRun)('SealosDevboxAdapter Integration Tests', () => {
   beforeAll(async () => {
     await adapter.ensureRunning();
     expect(adapter.status.state).toBe('Running');
-
-    await new Promise((resolve) => setTimeout(resolve, 2000));
   });
 
   afterAll(async () => {
