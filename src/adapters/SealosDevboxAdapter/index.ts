@@ -204,7 +204,7 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
       });
 
       if (!res.data) {
-        throw new CommandExecutionError(`Command execution failed: ${command}`, command);
+        throw new CommandExecutionError(`Command execution failed: ${res.message}`, command);
       }
 
       return {
@@ -212,9 +212,9 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
         stderr: res.data.stderr,
         exitCode: res.data.exitCode
       };
-    } catch (error) {
+    } catch (error: any) {
       throw new CommandExecutionError(
-        `Command execution failed: ${command}`,
+        `Command execution failed: ${error?.message || error?.code}`,
         command,
         error instanceof Error ? error : undefined
       );
