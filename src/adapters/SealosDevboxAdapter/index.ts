@@ -10,7 +10,6 @@ import type {
 import { BaseSandboxAdapter } from '../BaseSandboxAdapter';
 import { DevboxApi } from './api';
 import { DevboxPhaseEnum, type DevboxInfoData } from './type';
-import path from 'node:path';
 
 /**
  * Configuration for Sealos Devbox Adapter.
@@ -194,18 +193,11 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
   // ==================== Command Execution ====================
 
   async execute(command: string, options?: ExecuteOptions): Promise<ExecuteResult> {
-    try {
-      const baseWorkingDirectory = '/home/devbox';
-      const workingDirectory = (() => {
-        if (options?.workingDirectory === '/tmp') {
-          return '/tmp';
-        }
+    const cmd = options?.workingDirectory
+      ? ['sh', '-lc', `cd ${options.workingDirectory} && ${command}`]
+      : ['sh', '-lc', command];
 
-        return options?.workingDirectory
-          ? path.join(baseWorkingDirectory, options.workingDirectory)
-          : baseWorkingDirectory;
-      })();
-      const cmd = ['sh', '-lc', `cd ${workingDirectory} && ${command}`];
+    try {
       const res = await this.api.exec(this._id, {
         command: cmd,
         timeoutSeconds: options?.timeoutMs ? Math.ceil(options.timeoutMs / 1000) : undefined
