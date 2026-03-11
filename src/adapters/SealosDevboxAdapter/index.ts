@@ -140,6 +140,7 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
     try {
       this._status = { state: 'Creating' };
       await this.api.create(this._id);
+      await this.waitUntilReady();
       this._status = { state: 'Running' };
     } catch (error) {
       throw new ConnectionError('Failed to create sandbox', this.config.baseUrl, error);
@@ -195,11 +196,16 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
   async execute(command: string, options?: ExecuteOptions): Promise<ExecuteResult> {
     try {
       const baseWorkingDirectory = '/home/devbox';
-      const workingDirectory = options?.workingDirectory
-        ? path.join(baseWorkingDirectory, options.workingDirectory)
-        : baseWorkingDirectory;
-      const cmd = ['sh', '-lc', `cd ${workingDirectory} && ${command}`];
+      const workingDirectory = (() => {
+        if (options?.workingDirectory === '/tmp') {
+          return '/tmp';
+        }
 
+        return options?.workingDirectory
+          ? path.join(baseWorkingDirectory, options.workingDirectory)
+          : baseWorkingDirectory;
+      })();
+      const cmd = ['sh', '-lc', `cd ${workingDirectory} && ${command}`];
       const res = await this.api.exec(this._id, {
         command: cmd,
         timeoutSeconds: options?.timeoutMs ? Math.ceil(options.timeoutMs / 1000) : undefined
@@ -233,6 +239,7 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
     try {
       const res = await this.api.info(this._id);
       if (res.code !== 200) return false;
+
       return res.data.state.phase === DevboxPhaseEnum.Running;
     } catch {
       return false;
