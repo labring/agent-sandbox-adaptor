@@ -91,9 +91,9 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
         status: this._status,
         createdAt: new Date()
       };
-    } catch (error) {
+    } catch (error: any) {
       throw new CommandExecutionError(
-        'Failed to get sandbox info',
+        `Failed to get sandbox info`,
         'getInfo',
         error instanceof Error ? error : undefined
       );
@@ -121,20 +121,14 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
             await this.create();
             return;
           default:
-            throw new ConnectionError(
-              `Failed to ensure sandbox running: ${status}, ${sandbox.status.message}`
-            );
+            throw new ConnectionError(`Failed to ensure sandbox running`);
         }
       }
 
       // Not found, create sandbox
       await this.create();
     } catch (error: any) {
-      throw new ConnectionError(
-        `Failed to ensure sandbox running: ${error?.message || error?.code}`,
-        this.config.baseUrl,
-        error
-      );
+      throw new ConnectionError(`Failed to ensure sandbox running`, this.config.baseUrl, error);
     }
   }
   /*  
@@ -199,7 +193,7 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
 
   async execute(command: string, options?: ExecuteOptions): Promise<ExecuteResult> {
     const cmd = this.buildCommand(command, options?.workingDirectory);
-    console.log(cmd, 2222);
+    console.log(cmd, 2322222222222);
     try {
       const res = await this.api.exec(this._id, {
         command: cmd,
