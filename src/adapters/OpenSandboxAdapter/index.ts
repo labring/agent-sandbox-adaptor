@@ -463,7 +463,7 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
       };
     } catch (error: any) {
       throw new CommandExecutionError(
-        `Failed to get sandbox info`,
+        `Failed to get sandbox info: ${error?.message || error?.code}`,
         'getInfo',
         error instanceof Error ? error : undefined
       );
