@@ -432,6 +432,7 @@ export class CommandPolyfillService {
    * Escape a path for safe shell usage.
    */
   private escapePath(path: string): string {
+    if (!path) return '.';
     // Replace " with \" for shell safety
     return path.replace(/"/g, '\\"');
   }

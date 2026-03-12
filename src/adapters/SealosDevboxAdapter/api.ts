@@ -41,7 +41,14 @@ export class DevboxApi {
       headers.set('Content-Type', 'application/json');
     }
     const res = await fetch(input, { ...init, headers });
-    return (await res.json()) as DevboxApiResponse<T>;
+
+    if (!res.ok) {
+      throw new Error(res.statusText || res.status.toString());
+    }
+
+    const result = (await res.json()) as DevboxApiResponse<T>;
+
+    return result;
   }
 
   /** POST /api/v1/devbox — create a devbox */
