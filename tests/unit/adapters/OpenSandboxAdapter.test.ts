@@ -39,17 +39,14 @@ describe('OpenSandboxAdapter', () => {
 
     it('should handle connection errors gracefully', async () => {
       // Test with a URL that will fail - using a reserved port that won't have a server
-      const adapter = new OpenSandboxAdapter({
-        baseUrl: 'http://localhost:65530'
-      });
-
       const config: OpenSandboxConfigType = {
         image: { repository: 'nginx', tag: 'latest' }
       };
+      const adapter = new OpenSandboxAdapter({ baseUrl: 'http://localhost:65530' }, config);
 
       // Should throw an error when SDK fails
       try {
-        await adapter.create(config);
+        await adapter.create();
         // If we reach here without throwing, that's unexpected
         expect(true).toBe(false); // Force failure if no error thrown
       } catch (error) {
@@ -269,12 +266,13 @@ describe('OpenSandboxAdapter', () => {
 
   describe('Error Handling', () => {
     it('should wrap SDK errors in ConnectionError for create', async () => {
-      const adapter = new OpenSandboxAdapter({
-        baseUrl: 'http://localhost:1' // Invalid port
-      });
+      const adapter = new OpenSandboxAdapter(
+        { baseUrl: 'http://localhost:1' }, // Invalid port
+        { image: { repository: 'test' } }
+      );
 
       try {
-        await adapter.create({ image: { repository: 'test' } });
+        await adapter.create();
       } catch (error) {
         // Should be a connection-related error
         expect(error instanceof Error).toBe(true);

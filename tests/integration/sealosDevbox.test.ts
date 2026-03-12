@@ -18,6 +18,10 @@ const SANDBOX_TOKEN = process.env.SEALOS_DEVBOX_SERVER_TOKEN;
 const shouldRun = Boolean(SANDBOX_URL && SANDBOX_TOKEN);
 
 describe.skipIf(!shouldRun).sequential('SealosDevboxAdapter Integration Tests', () => {
+  if (!shouldRun) {
+    return;
+  }
+
   const devboxName = `test-devbox`;
 
   const config: SealosDevboxConfig = {

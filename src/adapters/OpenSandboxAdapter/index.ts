@@ -1,4 +1,9 @@
-import { ConnectionConfig, ExecutionHandlers, Sandbox } from '@alibaba-group/opensandbox';
+import {
+  ConnectionConfig,
+  ExecutionHandlers,
+  Sandbox,
+  type Endpoint as SdkEndpoint
+} from '@alibaba-group/opensandbox';
 import {
   CommandExecutionError,
   ConnectionError,
@@ -6,6 +11,7 @@ import {
   SandboxStateError
 } from '../../errors';
 import type {
+  Endpoint,
   ExecuteOptions,
   ExecuteResult,
   ImageSpec,
@@ -18,6 +24,7 @@ import type {
   StreamHandlers
 } from '@/types';
 import { BaseSandboxAdapter } from '../BaseSandboxAdapter';
+import { CommandPolyfillService } from '@/polyfill/CommandPolyfillService';
 import type { OpenSandboxConfigType } from './type';
 
 export type { OpenSandboxConfigType } from './type';
@@ -74,11 +81,12 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
 
   constructor(
     private connectionConfig: OpenSandboxConnectionConfig = {},
-    private createConfig: OpenSandboxConfigType
+    private createConfig?: OpenSandboxConfigType
   ) {
     super();
     this.runtime = connectionConfig.runtime ?? 'docker';
     this._connection = this.createConnectionConfig();
+    this.polyfillService = new CommandPolyfillService(this);
   }
 
   get id(): SandboxId {
@@ -218,20 +226,26 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
     return this.create();
   }
   async create(): Promise<void> {
+    if (!this.createConfig) {
+      throw new Error(
+        'createConfig is required to create a sandbox. Pass it as the third argument to createSandbox().'
+      );
+    }
+    const cfg = this.createConfig;
     try {
       this._status = { state: 'Creating' };
 
-      const image = this.convertImageSpec(this.createConfig.image);
-      const resource = this.convertResourceLimits(this.createConfig.resourceLimits);
+      const image = this.convertImageSpec(cfg.image);
+      const resource = this.convertResourceLimits(cfg.resourceLimits);
 
       this._sandbox = await Sandbox.create({
         connectionConfig: this._connection,
         image,
-        entrypoint: this.createConfig.entrypoint,
-        timeoutSeconds: this.createConfig.timeout,
+        entrypoint: cfg.entrypoint,
+        timeoutSeconds: cfg.timeout,
         resource,
-        env: this.createConfig.env,
-        metadata: this.createConfig.metadata
+        env: cfg.env,
+        metadata: cfg.metadata
       });
 
       this._id = this._sandbox.id;
@@ -319,6 +333,54 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
         error instanceof Error ? error : undefined
       );
     }
+  }
+
+  /**
+   * Release client-side resources owned by this Sandbox instance.
+   * Does NOT stop or delete the container - the sandbox keeps running.
+   * Use this to disconnect from a sandbox without destroying it.
+   */
+  async close(): Promise<void> {
+    if (this._sandbox) {
+      await this._sandbox.close();
+    }
+  }
+
+  /**
+   * Get endpoint information for a specific port exposed by the sandbox.
+   * @param port The port number to get endpoint for
+   * @returns Endpoint with host, port, protocol and url fields
+   */
+  async getEndpoint(port: number): Promise<Endpoint> {
+    const sdkEndpoint = (await this.sandbox.getEndpoint(port)) as SdkEndpoint;
+    return this.convertSdkEndpoint(sdkEndpoint, port);
+  }
+
+  /**
+   * Convert SDK Endpoint (no-scheme string) to our Endpoint type.
+   * SDK format: "localhost:44772" or "domain/route/.../44772"
+   */
+  private convertSdkEndpoint(sdkEndpoint: SdkEndpoint, requestedPort: number): Endpoint {
+    const raw = sdkEndpoint.endpoint;
+    const colonIdx = raw.lastIndexOf(':');
+    const hasPathBeforeColon = colonIdx !== -1 && raw.slice(0, colonIdx).includes('/');
+
+    if (colonIdx !== -1 && !hasPathBeforeColon) {
+      // "host:port" format
+      const host = raw.slice(0, colonIdx);
+      const parsedPort = parseInt(raw.slice(colonIdx + 1), 10);
+      const port = isNaN(parsedPort) ? requestedPort : parsedPort;
+      const protocol: 'http' | 'https' = port === 443 ? 'https' : 'http';
+      return { host, port, protocol, url: `${protocol}://${raw}` };
+    }
+
+    // Path-based routing: "domain/route/.../44772" (reverse proxy with HTTPS)
+    return {
+      host: raw,
+      port: requestedPort,
+      protocol: 'https',
+      url: `https://${raw}`
+    };
   }
 
   async getInfo(): Promise<SandboxInfo | null> {
