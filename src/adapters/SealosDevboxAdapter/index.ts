@@ -128,11 +128,7 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
       // Not found, create sandbox
       await this.create();
     } catch (error: any) {
-      throw new ConnectionError(
-        `Failed to ensure sandbox running: ${error?.message || error?.code}`,
-        this.config.baseUrl,
-        error
-      );
+      throw new ConnectionError(`Failed to ensure sandbox running`, this.config.baseUrl, error);
     }
   }
   /*  
