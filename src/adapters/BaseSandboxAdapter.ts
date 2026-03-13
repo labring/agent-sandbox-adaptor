@@ -399,4 +399,21 @@ export abstract class BaseSandboxAdapter implements ISandbox {
     }
     return this.polyfillService;
   }
+
+  protected escapeShellArg(arg: string): string {
+    // Replace single quotes with '\'' (end quote, escaped quote, start quote)
+    return `'${arg.replace(/'/g, "'\\''")}'`;
+  }
+  protected buildCommand(command: string, workingDirectory?: string): string[] {
+    if (workingDirectory) {
+      // Escape the working directory path
+      const escapedDir = this.escapeShellArg(workingDirectory);
+
+      // Build: sh -lc 'cd '\''escaped/path'\'' && original command'
+      return ['sh', '-lc', `cd ${escapedDir} && ${command}`];
+    }
+
+    // Just escape the command
+    return ['sh', '-lc', command];
+  }
 }

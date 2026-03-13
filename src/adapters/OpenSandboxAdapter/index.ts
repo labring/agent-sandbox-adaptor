@@ -405,9 +405,9 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
           (info as Record<string, unknown>).resourceLimits as Record<string, string> | undefined
         )
       };
-    } catch (error) {
+    } catch (error: any) {
       throw new CommandExecutionError(
-        'Failed to get sandbox info',
+        `Failed to get sandbox info`,
         'getInfo',
         error instanceof Error ? error : undefined
       );
