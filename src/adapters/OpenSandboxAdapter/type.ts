@@ -27,4 +27,13 @@ export interface OpenSandboxConfigType {
 
   /** Provider-specific extensions */
   extensions?: Record<string, unknown>;
+
+  /** Skip readiness checks after create/connect */
+  skipHealthCheck?: boolean;
+
+  /** Max seconds to wait for sandbox readiness */
+  readyTimeoutSeconds?: number;
+
+  /** Poll interval for readiness checks in milliseconds */
+  healthCheckPollingInterval?: number;
 }

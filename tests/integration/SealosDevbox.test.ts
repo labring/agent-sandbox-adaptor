@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SealosDevboxAdapter, type SealosDevboxConfig } from '@/adapters/SealosDevboxAdapter';
-import { sandboxTestData } from './data';
+import { describeSandboxContract } from './suites';
 
 /**
  * Integration tests for SealosDevboxAdapter.
@@ -54,6 +54,7 @@ describe.skipIf(!shouldRun).sequential('SealosDevboxAdapter Integration Tests', 
     });
   });
 
-  // 通用测试
-  sandboxTestData(adapter);
+  describeSandboxContract({
+    getAdapter: () => adapter
+  });
 });
