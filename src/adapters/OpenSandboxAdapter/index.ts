@@ -44,6 +44,12 @@ export interface OpenSandboxConnectionConfig {
   baseUrl?: string;
   /** API key for authentication */
   apiKey?: string;
+  /** SDK request timeout in seconds */
+  requestTimeoutSeconds?: number;
+  /** Enable SDK HTTP debug logging */
+  debug?: boolean;
+  /** Route execd traffic through the OpenSandbox server proxy */
+  useServerProxy?: boolean;
   /**
    * Sandbox runtime type.
    * @default 'docker'
@@ -105,15 +111,18 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
   }
 
   private createConnectionConfig(): ConnectionConfig {
-    const { baseUrl, apiKey } = this.connectionConfig;
+    const { baseUrl, apiKey, requestTimeoutSeconds, debug, useServerProxy } = this.connectionConfig;
 
     if (!baseUrl) {
-      return new ConnectionConfig({ apiKey });
+      return new ConnectionConfig({ apiKey, requestTimeoutSeconds, debug, useServerProxy });
     }
 
     return new ConnectionConfig({
       domain: baseUrl,
-      apiKey
+      apiKey,
+      requestTimeoutSeconds,
+      debug,
+      useServerProxy
     });
   }
 
@@ -220,6 +229,34 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
     return result;
   }
 
+  private extractExitCode(execution: {
+    error?: {
+      value?: string;
+      traceback?: string[];
+    };
+  }): number {
+    const rawValue = execution.error?.value?.trim();
+    if (rawValue) {
+      const parsed = Number.parseInt(rawValue, 10);
+      if (!Number.isNaN(parsed)) {
+        return parsed;
+      }
+    }
+
+    const traceback = execution.error?.traceback ?? [];
+    for (const line of traceback) {
+      const match = line.match(/exit status (\d+)/i);
+      if (match?.[1]) {
+        const parsed = Number.parseInt(match[1], 10);
+        if (!Number.isNaN(parsed)) {
+          return parsed;
+        }
+      }
+    }
+
+    return 0;
+  }
+
   // ==================== Lifecycle Methods ====================
 
   async ensureRunning(): Promise<void> {
@@ -245,7 +282,10 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
         timeoutSeconds: cfg.timeout,
         resource,
         env: cfg.env,
-        metadata: cfg.metadata
+        metadata: cfg.metadata,
+        skipHealthCheck: cfg.skipHealthCheck,
+        readyTimeoutSeconds: cfg.readyTimeoutSeconds,
+        healthCheckPollingInterval: cfg.healthCheckPollingInterval
       });
 
       this._id = this._sandbox.id;
@@ -262,7 +302,10 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
 
       this._sandbox = await Sandbox.connect({
         sandboxId,
-        connectionConfig: this._connection
+        connectionConfig: this._connection,
+        skipHealthCheck: this.createConfig?.skipHealthCheck,
+        readyTimeoutSeconds: this.createConfig?.readyTimeoutSeconds,
+        healthCheckPollingInterval: this.createConfig?.healthCheckPollingInterval
       });
 
       this._id = this._sandbox.id;
@@ -308,9 +351,21 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
   async stop(): Promise<void> {
     try {
       this._status = { state: 'Stopping' };
-      await this.sandbox.kill();
+      await this.sandbox.pause();
       this._status = { state: 'Stopped' };
     } catch (error) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        'code' in error &&
+        error.code === 'SANDBOX::API_NOT_SUPPORTED'
+      ) {
+        throw new FeatureNotSupportedError(
+          'Stop/pause not supported by this runtime',
+          'stop',
+          this.provider
+        );
+      }
       throw new CommandExecutionError(
         'Failed to stop sandbox',
         'stop',
@@ -437,7 +492,7 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
 
       const stdout = execution.logs.stdout.map((msg) => msg.text).join('\n');
       const stderr = execution.logs.stderr.map((msg) => msg.text).join('\n');
-      const exitCode = 0;
+      const exitCode = this.extractExitCode(execution);
 
       const stdoutLength = execution.logs.stdout.reduce((sum, msg) => sum + msg.text.length, 0);
       const stderrLength = execution.logs.stderr.reduce((sum, msg) => sum + msg.text.length, 0);
@@ -490,7 +545,7 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
       if (handlers.onComplete) {
         const stdout = execution.logs.stdout.map((msg) => msg.text).join('\n');
         const stderr = execution.logs.stderr.map((msg) => msg.text).join('\n');
-        const exitCode = 0;
+        const exitCode = this.extractExitCode(execution);
 
         const stdoutLength = execution.logs.stdout.reduce((sum, msg) => sum + msg.text.length, 0);
         const stderrLength = execution.logs.stderr.reduce((sum, msg) => sum + msg.text.length, 0);

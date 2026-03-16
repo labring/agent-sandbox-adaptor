@@ -30,6 +30,29 @@ describe('OpenSandboxAdapter', () => {
       expect(adapter.status.state).toBe('Creating');
     });
 
+    it('should pass server proxy settings into ConnectionConfig', () => {
+      const adapter = new OpenSandboxAdapter({
+        baseUrl: 'https://api.example.com',
+        apiKey: 'test-api-key',
+        useServerProxy: true,
+        requestTimeoutSeconds: 60,
+        debug: true
+      });
+      const connection = (
+        adapter as unknown as {
+          _connection: {
+            useServerProxy: boolean;
+            requestTimeoutSeconds: number;
+            debug: boolean;
+          };
+        }
+      )._connection;
+
+      expect(connection.useServerProxy).toBe(true);
+      expect(connection.requestTimeoutSeconds).toBe(60);
+      expect(connection.debug).toBe(true);
+    });
+
     it('should throw SandboxStateError when accessing sandbox before initialization', async () => {
       const adapter = new OpenSandboxAdapter();
 
