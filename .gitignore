@@ -14,3 +14,7 @@ dist/
 coverage
 
 local/
+
+# Claude skills workspace (eval outputs)
+.claude/skills/add-sandbox-adapter-workspace/
+.claude/design/

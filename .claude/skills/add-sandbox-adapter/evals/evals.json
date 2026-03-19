@@ -1,0 +1,29 @@
+{
+  "skill_name": "add-sandbox-adapter",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "我想添加 E2B 沙盒的支持。我知道的信息：E2B 提供 REST API，地址是 https://api.e2b.dev，使用 API key 认证。他们支持用 POST /sandboxes 创建沙盒，用 POST /sandboxes/{id}/exec 执行命令，还有基本的生命周期操作（启动、停止、删除）。沙盒状态有：'running'、'stopped'、'creating'、'error'。能帮我添加 E2B 适配器吗？",
+      "expected_output": "应该创建完整的 E2B 适配器，包括：1) src/adapters/E2BAdapter/index.ts 中的 E2BAdapter 类，2) type.ts 中的类型定义，3) api.ts 中的 API 客户端，4) 更新 src/adapters/index.ts 的工厂集成，5) .env.test.template 中的环境变量，6) tests/unit/adapters/E2BAdapter.test.ts 中的单元测试",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "添加 Modal Labs 的适配器。他们的 SDK 可以通过 npm 安装：@modal-labs/client。认证使用 API token。他们原生支持命令执行（同步和流式）、文件系统操作和指标。沙盒生命周期：create()、start()、stop()、terminate()。状态映射：PENDING -> Creating，RUNNING -> Running，STOPPED -> Stopped，TERMINATED -> UnExist。SDK 导出一个 Sandbox 类，有这些方法：exec()、readFile()、writeFile()、getMetrics()。",
+      "expected_output": "应该创建使用 SDK 的 Modal 适配器，包括：1) 导入 @modal-labs/client 的 ModalAdapter 类，2) execute、文件系统和指标的原生实现（不使用 polyfill），3) 正确的 SDK 错误处理，4) Modal 特定配置的类型定义，5) 工厂集成，6) 环境变量，7) 全面的测试",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "我需要为 RunPod 添加适配器。RunPod 的 API 文档显示：基础 URL 是 https://api.runpod.io/v2，使用 Bearer token 认证。创建沙盒用 POST /pods，执行命令用 POST /pods/{id}/exec，状态查询用 GET /pods/{id}。状态包括：CREATED（刚创建）、RUNNING（运行中）、EXITED（已停止）。他们不支持暂停/恢复功能，只能创建和删除。命令执行返回 {\"output\": \"...\", \"error\": \"...\", \"exit_code\": 0}。",
+      "expected_output": "应该创建 RunPod 适配器，包括：1) 保留适当中文注释的 RunPodAdapter 类，2) 处理 Bearer token 认证的 API 客户端，3) 状态映射：CREATED->Creating，RUNNING->Running，EXITED->Stopped，4) start() 和 stop() 方法抛出 FeatureNotSupportedError，5) 文件系统使用 Polyfill 服务，6) exec 端点的正确响应解析，7) 所有集成文件更新，8) 覆盖不支持功能的测试",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "帮我添加一个 Gitpod 沙盒的适配器。Gitpod 有官方的 @gitpod/gitpod-protocol SDK。他们的工作区（workspace）就是沙盒，可以通过 SDK 创建、启动、停止。认证用 access token。状态有：stopped、running、interrupted。支持执行命令和访问文件系统。",
+      "expected_output": "应该创建 Gitpod 适配器，包括：1) 使用 @gitpod/gitpod-protocol SDK 的 GitpodAdapter 类，2) 工作区到沙盒概念的映射，3) 状态映射：stopped->Stopped，running->Running，interrupted->Error，4) SDK 的命令执行和文件系统集成，5) 类型定义，6) 工厂集成，7) 环境变量，8) 测试",
+      "files": []
+    }
+  ]
+}

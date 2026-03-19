@@ -10,6 +10,24 @@ A unified, high-level abstraction layer for cloud sandbox providers. It offers a
 pnpm add @fastgpt/sandbox
 ```
 
+## Next.js 集成
+
+如果在 Next.js 项目中使用，需要配置以处理 ESM 依赖。在 `next.config.js` 中添加：
+
+```javascript
+/** @type {import('next').NextConfig} */
+const nextConfig = {
+  transpilePackages: ['@fastgpt-sdk/sandbox-adapter'],
+  experimental: {
+    esmExternals: 'loose',
+  },
+};
+
+module.exports = nextConfig;
+```
+
+详细说明请参考 [Next.js 集成指南](./docs/NEXTJS_INTEGRATION.md)。
+
 ## 用途
 
 ### 1. 操作沙盒

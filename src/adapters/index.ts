@@ -4,19 +4,23 @@ import {
   type OpenSandboxConnectionConfig,
   type OpenSandboxConfigType
 } from './OpenSandboxAdapter';
+import { E2BAdapter, type E2BConfig } from './E2BAdapter';
 import { ISandbox } from '@/interfaces';
 
 export { SealosDevboxAdapter } from './SealosDevboxAdapter';
 export type { SealosDevboxConfig } from './SealosDevboxAdapter';
 export { OpenSandboxAdapter } from './OpenSandboxAdapter';
 export type { OpenSandboxConfigType, OpenSandboxConnectionConfig } from './OpenSandboxAdapter';
+export { E2BAdapter } from './E2BAdapter';
+export type { E2BConfig } from './E2BAdapter';
 
-export type SandboxProviderType = 'opensandbox' | 'sealosdevbox';
+export type SandboxProviderType = 'opensandbox' | 'sealosdevbox' | 'e2b';
 
 /** Maps each provider name to the ISandbox config type it exposes. */
 interface SandboxConfigMap {
   opensandbox: OpenSandboxConfigType;
   sealosdevbox: undefined;
+  e2b: undefined;
 }
 
 /** Resolves the concrete ISandbox type for a given provider. */
@@ -25,6 +29,7 @@ interface SandboxConfigMap {
 interface SandboxConnectionConfig {
   opensandbox: OpenSandboxConnectionConfig;
   sealosdevbox: SealosDevboxConfig;
+  e2b: E2BConfig;
 }
 
 /**
@@ -49,6 +54,9 @@ export function createSandbox<P extends SandboxProviderType>(
 
     case 'sealosdevbox':
       return new SealosDevboxAdapter(config as SealosDevboxConfig);
+
+    case 'e2b':
+      return new E2BAdapter(config as E2BConfig);
 
     default:
       throw new Error(`Unknown provider: ${provider}`);

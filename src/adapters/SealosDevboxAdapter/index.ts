@@ -139,6 +139,7 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
       this._status = { state: 'Creating' };
       await this.api.create(this._id);
       await this.waitUntilReady();
+      await new Promise((resolve) => setTimeout(resolve, 1000));
       this._status = { state: 'Running' };
     } catch (error) {
       throw new ConnectionError('Failed to create sandbox', this.config.baseUrl, error);
@@ -193,7 +194,6 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
 
   async execute(command: string, options?: ExecuteOptions): Promise<ExecuteResult> {
     const cmd = this.buildCommand(command, options?.workingDirectory);
-    console.log(cmd, 2322222222222);
     try {
       const res = await this.api.exec(this._id, {
         command: cmd,
