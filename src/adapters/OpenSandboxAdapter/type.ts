@@ -1,4 +1,5 @@
 import { ImageSpec, NetworkPolicy, ResourceLimits } from '@/types';
+import type { Volume } from '@alibaba-group/opensandbox';
 
 /**
  * Configuration for creating a sandbox.
@@ -24,6 +25,9 @@ export interface OpenSandboxConfigType {
 
   /** Network access policy */
   networkPolicy?: NetworkPolicy;
+
+  /** Optional volume mounts for persistent storage */
+  volumes?: Volume[];
 
   /** Provider-specific extensions */
   extensions?: Record<string, unknown>;

@@ -283,6 +283,7 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
         resource,
         env: cfg.env,
         metadata: cfg.metadata,
+        volumes: cfg.volumes,
         skipHealthCheck: cfg.skipHealthCheck,
         readyTimeoutSeconds: cfg.readyTimeoutSeconds,
         healthCheckPollingInterval: cfg.healthCheckPollingInterval
