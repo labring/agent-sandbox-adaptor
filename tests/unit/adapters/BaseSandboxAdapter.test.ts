@@ -166,7 +166,7 @@ describe('BaseSandboxAdapter', () => {
 
   it('should resolve waitUntilReady when ping succeeds', async () => {
     const adapter = new MockSandboxAdapter();
-    await adapter.waitUntilReady(5000);
+    await adapter.waitUntilReady();
   });
 
   it('should throw SandboxReadyTimeoutError when ping never succeeds', async () => {

@@ -139,6 +139,7 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
       this._status = { state: 'Creating' };
       await this.api.create(this._id);
       await this.waitUntilReady();
+      await new Promise((resolve) => setTimeout(resolve, 1000));
       this._status = { state: 'Running' };
     } catch (error) {
       throw new ConnectionError('Failed to create sandbox', this.config.baseUrl, error);

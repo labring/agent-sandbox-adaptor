@@ -56,6 +56,7 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
       it('should return true when container is healthy', async () => {
         const adapter = getAdapter();
         const result = await adapter.ping();
+        await adapter.ensureRunning();
 
         expect(result).toBe(true);
       });

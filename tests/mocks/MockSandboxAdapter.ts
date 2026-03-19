@@ -30,7 +30,7 @@ export interface MockSandboxAdapterOptions {
  * Mock adapter for testing the base class behavior.
  * Provides in-memory filesystem and command execution.
  */
-export class MockSandboxAdapter extends BaseSandboxAdapter<unknown> {
+export class MockSandboxAdapter extends BaseSandboxAdapter {
   readonly provider = 'mock';
 
   _id: SandboxId = 'mock-sandbox-id';

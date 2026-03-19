@@ -5,3 +5,4 @@ node_modules
 document/
 *.md
 *.mdx
+.claude

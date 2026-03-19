@@ -1,6 +1,6 @@
 {
   "name": "@fastgpt-sdk/sandbox-adapter",
-  "version": "0.0.19",
+  "version": "0.0.21",
   "description": "Unified abstraction layer for cloud sandbox providers with adapter pattern and feature polyfilling",
   "type": "module",
   "main": "./dist/index.js",
@@ -47,7 +47,8 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@alibaba-group/opensandbox": "^0.1.4"
+    "@alibaba-group/opensandbox": "^0.1.4",
+    "@e2b/code-interpreter": "^2.3.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
@@ -66,10 +67,10 @@
     "vitest": "^3.0.9"
   },
   "lint-staged": {
-    "*.{js,cjs,mjs,ts,tsx,json,md,mdx,yaml,yml}": [
+    "!(.claude)/**/*.{js,cjs,mjs,ts,tsx,json,md,mdx,yaml,yml}": [
       "prettier --check"
     ],
-    "*.{js,cjs,mjs,ts,tsx}": [
+    "!(.claude)/**/*.{js,cjs,mjs,ts,tsx}": [
       "eslint --max-warnings=0"
     ]
   }
