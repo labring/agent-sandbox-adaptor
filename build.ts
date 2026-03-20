@@ -1,16 +1,16 @@
 import { rmSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
-// External dependencies (peer dependencies)
-const EXTERNAL_DEPS = ['@alibaba-group/opensandbox', '@e2b/code-interpreter'];
+// External dependencies for ESM build (consumers install these)
+const ESM_EXTERNAL_DEPS = ['@alibaba-group/opensandbox', '@e2b/code-interpreter'];
 
 // Clean dist directory
 console.log('🧹 Cleaning dist directory...');
 rmSync('dist', { recursive: true, force: true });
 
-// Build with bun
-console.log('📦 Building with bun...');
-const result = await Bun.build({
+// ESM build — keep peer deps external
+console.log('📦 Building ESM...');
+const esmResult = await Bun.build({
   entrypoints: ['./src/index.ts'],
   outdir: './dist',
   target: 'node',
@@ -18,12 +18,33 @@ const result = await Bun.build({
   splitting: false,
   sourcemap: 'none',
   minify: false,
-  external: EXTERNAL_DEPS
+  external: ESM_EXTERNAL_DEPS
 });
 
-if (!result.success) {
-  console.error('❌ Build failed');
-  result.logs.forEach((log) => console.error(log));
+if (!esmResult.success) {
+  console.error('❌ ESM build failed');
+  esmResult.logs.forEach((log) => console.error(log));
+  process.exit(1);
+}
+
+// CJS build — bundle all deps (including ESM-only ones like chalk) for CommonJS compatibility.
+// This avoids "ERR_PACKAGE_PATH_NOT_EXPORTED" when bundlers like webpack/rspack call require().
+console.log('📦 Building CJS...');
+const cjsResult = await Bun.build({
+  entrypoints: ['./src/index.ts'],
+  outdir: './dist',
+  target: 'node',
+  format: 'cjs',
+  naming: '[name].cjs',
+  splitting: false,
+  sourcemap: 'none',
+  minify: false
+  // No externals: bundle everything so require() works out of the box
+});
+
+if (!cjsResult.success) {
+  console.error('❌ CJS build failed');
+  cjsResult.logs.forEach((log) => console.error(log));
   process.exit(1);
 }
 
