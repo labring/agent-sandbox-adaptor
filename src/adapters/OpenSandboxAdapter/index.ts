@@ -279,7 +279,7 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
         connectionConfig: this._connection,
         image,
         entrypoint: cfg.entrypoint,
-        timeoutSeconds: cfg.timeout,
+        timeoutSeconds: cfg.timeoutSeconds ?? null,
         resource,
         env: cfg.env,
         metadata: cfg.metadata,
@@ -456,7 +456,7 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
         metadata: info.metadata,
         status: this.mapStatus(info.status as { state: string; reason?: string; message?: string }),
         createdAt: info.createdAt,
-        expiresAt: info.expiresAt,
+        expiresAt: info.expiresAt ?? undefined,
         resourceLimits: this.parseResourceLimits(
           (info as Record<string, unknown>).resourceLimits as Record<string, string> | undefined
         )
