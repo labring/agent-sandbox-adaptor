@@ -3,7 +3,7 @@ import {
   ExecutionHandlers,
   Sandbox,
   type Endpoint as SdkEndpoint
-} from '@alibaba-group/opensandbox';
+} from '../../../opensandbox';
 import {
   CommandExecutionError,
   ConnectionError,
