@@ -48,7 +48,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@alibaba-group/opensandbox": "^0.1.4",
+    "@alibaba-group/opensandbox": "file:./opensandbox",
     "@e2b/code-interpreter": "^2.3.3"
   },
   "devDependencies": {
@@ -72,7 +72,7 @@
       "prettier --check"
     ],
     "!(.claude)/**/*.{js,cjs,mjs,ts,tsx}": [
-      "eslint --max-warnings=0"
+      "eslint --max-warnings=0 --no-warn-ignored"
     ]
   }
 }
