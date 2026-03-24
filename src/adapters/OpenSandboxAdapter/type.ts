@@ -14,6 +14,9 @@ export interface OpenSandboxConfigType {
   /** Timeout in seconds (0 for no timeout) */
   timeout?: number;
 
+  /** Sandbox timeout in seconds. Set to `null` to require explicit cleanup. */
+  timeoutSeconds?: number | null;
+
   /** Resource limits */
   resourceLimits?: ResourceLimits;
 
