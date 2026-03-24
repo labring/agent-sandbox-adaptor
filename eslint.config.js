@@ -12,7 +12,7 @@ const jsRecommended = js.configs.recommended;
 
 export default [
   {
-    ignores: ['dist', 'node_modules', 'coverage', '.claude']
+    ignores: ['dist', 'node_modules', 'coverage', '.claude', 'opensandbox']
   },
   {
     ...jsRecommended,
