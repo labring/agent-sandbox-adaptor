@@ -1,9 +1,6 @@
 import { rmSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 
-// External dependencies for ESM build (consumers install these)
-const ESM_EXTERNAL_DEPS = ['@alibaba-group/opensandbox', '@e2b/code-interpreter'];
-
 // Clean dist directory
 console.log('🧹 Cleaning dist directory...');
 rmSync('dist', { recursive: true, force: true });
@@ -17,8 +14,8 @@ const esmResult = await Bun.build({
   format: 'esm',
   splitting: false,
   sourcemap: 'none',
-  minify: false,
-  external: ESM_EXTERNAL_DEPS
+  minify: false
+  // external: ESM_EXTERNAL_DEPS
 });
 
 if (!esmResult.success) {
