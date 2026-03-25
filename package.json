@@ -1,6 +1,6 @@
 {
   "name": "@fastgpt-sdk/sandbox-adapter",
-  "version": "0.0.29",
+  "version": "0.0.31",
   "description": "Unified abstraction layer for cloud sandbox providers with adapter pattern and feature polyfilling",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -14,8 +14,7 @@
     }
   },
   "files": [
-    "dist",
-    "opensandbox"
+    "dist"
   ],
   "publishConfig": {
     "access": "public"
@@ -49,7 +48,6 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@alibaba-group/opensandbox": "file:./opensandbox",
     "@e2b/code-interpreter": "^2.3.3"
   },
   "devDependencies": {
