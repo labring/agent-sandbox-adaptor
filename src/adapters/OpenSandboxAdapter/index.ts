@@ -5,7 +5,7 @@ import {
   SandboxException,
   SandboxManager,
   type Endpoint as SdkEndpoint
-} from '../../../opensandbox';
+} from '@alibaba-group/opensandbox';
 import {
   CommandExecutionError,
   ConnectionError,
