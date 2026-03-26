@@ -4,7 +4,7 @@
 export interface E2BConfig {
   /** E2B API Key */
   apiKey: string;
-  /** 可选的沙盒 ID，用于连接到已存在的沙盒 */
+  /** 的沙盒 ID，用于连接到已存在的沙盒 */
   sandboxId: string;
   /** 可选的模板 ID，用于创建新沙盒 */
   template?: string;

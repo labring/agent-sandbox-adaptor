@@ -1,5 +1,5 @@
 import { CommandPolyfillService } from '@/polyfill/CommandPolyfillService';
-import { CommandExecutionError, ConnectionError, TimeoutError } from '../../errors';
+import { CommandExecutionError, ConnectionError } from '../../errors';
 import type {
   ExecuteOptions,
   ExecuteResult,
@@ -56,21 +56,6 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
       default:
         return 'Error';
     }
-  }
-
-  private async waitUntilDeleted() {
-    const startTime = Date.now();
-    const checkInterval = 1000;
-
-    while (Date.now() - startTime < 120000) {
-      const data = await this.getInfo().catch(() => true);
-      if (!data) {
-        return;
-      }
-      await this.sleep(checkInterval);
-    }
-
-    throw new TimeoutError('Sandbox not deleted', 120000, 'waitUntilDeleted');
   }
 
   // ==================== Lifecycle Methods ====================

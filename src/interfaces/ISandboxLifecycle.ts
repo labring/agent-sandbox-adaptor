@@ -6,7 +6,7 @@ import type { SandboxId, SandboxInfo, SandboxStatus } from '../types';
  */
 export interface ISandboxLifecycle {
   /** Unique identifier for this sandbox */
-  readonly id: SandboxId;
+  readonly id?: SandboxId;
 
   /** Current status of the sandbox */
   readonly status: SandboxStatus;
@@ -48,6 +48,7 @@ export interface ISandboxLifecycle {
    * @throws {SandboxReadyTimeoutError} If timeout is exceeded
    */
   waitUntilReady(timeoutMs?: number): Promise<void>;
+  waitUntilDeleted(timeoutMs?: number): Promise<void>;
 
   /**
    * Renew the sandbox expiration, extending its lifetime.

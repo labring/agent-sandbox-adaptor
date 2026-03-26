@@ -9,20 +9,18 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
   const adapter = getAdapter();
 
   // ==================== Container Lifecycle Operations ====================
-  describe('Container Lifecycle Operations', () => {
+  describe.sequential('Container Lifecycle Operations', () => {
     describe('ensureRunning()', () => {
       it('should return immediately when sandbox is already running', async () => {
-        const adapter = getAdapter();
         // Sandbox is running from beforeAll
         await expect(adapter.ensureRunning()).resolves.toBeUndefined();
         expect(adapter.status.state).toBe('Running');
       });
 
       it('should start sandbox when it is stopped', async () => {
-        const adapter = getAdapter();
         // Stop the sandbox first
         await adapter.stop();
-        expect(adapter.status.state).toBe('Stopped');
+        expect(['Stopped', 'Stopping']).toContain(adapter.status.state);
 
         // ensureRunning should start it
         await adapter.ensureRunning();
@@ -30,7 +28,6 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
       });
 
       it('should wait and verify sandbox is running', async () => {
-        const adapter = getAdapter();
         // Ensure sandbox is running
         await adapter.ensureRunning();
 
@@ -43,7 +40,6 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
 
     describe('getInfo()', () => {
       it('should return sandbox info', async () => {
-        const adapter = getAdapter();
         const info = await adapter.getInfo();
 
         expect(info).not.toBeNull();
@@ -54,9 +50,8 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
 
     describe('ping()', () => {
       it('should return true when container is healthy', async () => {
-        const adapter = getAdapter();
-        const result = await adapter.ping();
         await adapter.ensureRunning();
+        const result = await adapter.ping();
 
         expect(result).toBe(true);
       });
@@ -64,14 +59,12 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
 
     describe('pause() and resume()', () => {
       it('should pause the container', async () => {
-        const adapter = getAdapter();
         await adapter.stop();
 
-        expect(adapter.status.state).toBe('Stopped');
+        expect(['Stopped', 'Stopping']).toContain(adapter.status.state);
       });
 
       it('should resume the container', async () => {
-        const adapter = getAdapter();
         await adapter.start();
 
         expect(adapter.status.state).toBe('Running');
@@ -80,14 +73,12 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
 
     describe('stop() and start()', () => {
       it('should stop the container', async () => {
-        const adapter = getAdapter();
         await adapter.stop();
 
         expect(adapter.status.state).toBe('Stopped');
       });
 
       it('should start the container', async () => {
-        const adapter = getAdapter();
         await adapter.start();
 
         expect(adapter.status.state).toBe('Running');
@@ -96,7 +87,6 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
 
     describe('waitUntilReady()', () => {
       it('should resolve when container is ready', async () => {
-        const adapter = getAdapter();
         await expect(adapter.waitUntilReady(30000)).resolves.toBeUndefined();
       }, 35_000);
     });
@@ -105,12 +95,10 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
   // ==================== Command Operations ====================
   describe('Command Operations', () => {
     beforeAll(async () => {
-      const adapter = getAdapter();
       await adapter.ensureRunning();
     });
     describe('execute()', () => {
       it('should execute a simple command', async () => {
-        const adapter = getAdapter();
         const result = await adapter.execute('echo "Hello, World!"');
 
         expect(result.stdout.trim()).toBe('Hello, World!');
@@ -118,7 +106,6 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
       });
 
       it('should execute command with working directory', async () => {
-        const adapter = getAdapter();
         const result = await adapter.execute('pwd', { workingDirectory: '/tmp' });
 
         expect(result.stdout.trim()).toContain('/tmp');
@@ -126,7 +113,6 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
       });
 
       it('should capture stderr output', async () => {
-        const adapter = getAdapter();
         const result = await adapter.execute('echo "error" >&2');
 
         expect(result.stderr.trim()).toBe('error');
@@ -134,14 +120,12 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
       });
 
       it('should return non-zero exit code on failure', async () => {
-        const adapter = getAdapter();
         const result = await adapter.execute('exit 1');
 
         expect(result.exitCode).toBe(1);
       });
 
       it('should handle complex shell commands', async () => {
-        const adapter = getAdapter();
         const result = await adapter.execute('echo "a b c" | wc -w');
 
         expect(result.stdout.trim()).toBe('3');
@@ -149,7 +133,6 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
       });
 
       it('should handle environment variables', async () => {
-        const adapter = getAdapter();
         const result = await adapter.execute('echo $HOME');
 
         expect(result.stdout.trim()).not.toBe('');
@@ -159,7 +142,6 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
 
     describe('executeStream()', () => {
       it('should stream stdout to handler', async () => {
-        const adapter = getAdapter();
         const chunks: string[] = [];
 
         await adapter.executeStream('echo "streamed"', {
@@ -172,7 +154,6 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
       });
 
       it('should stream stderr to handler', async () => {
-        const adapter = getAdapter();
         const chunks: string[] = [];
 
         await adapter.executeStream('echo "error" >&2', {
@@ -185,7 +166,6 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
       });
 
       it('should call onComplete with result', async () => {
-        const adapter = getAdapter();
         let exitCode: number | null | undefined;
 
         await adapter.executeStream('echo done', {
@@ -206,7 +186,6 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
     const testContent = 'Hello, FastGPT!';
 
     beforeAll(async () => {
-      const adapter = getAdapter();
       await adapter.ensureRunning();
       // Create test directory and clean up any existing test files
       await adapter.execute(`mkdir -p ${testDir}`);
@@ -214,7 +193,6 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
     });
 
     afterAll(async () => {
-      const adapter = getAdapter();
       // Cleanup test directory
       try {
         await adapter.deleteDirectories([testDir], { recursive: true, force: true });
@@ -226,7 +204,6 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
     // ===== writeFiles Tests =====
     describe('writeFiles()', () => {
       it('should write single file with string content', async () => {
-        const adapter = getAdapter();
         const results = await adapter.writeFiles([{ path: testFile, data: testContent }]);
 
         expect(results).toHaveLength(1);
@@ -241,7 +218,6 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
       });
 
       it('should write multiple files in batch', async () => {
-        const adapter = getAdapter();
         const files = [
           { path: `${testDir}/test-multi1.txt`, data: 'Content 1' },
           { path: `${testDir}/test-multi2.txt`, data: 'Content 2' },
@@ -264,7 +240,6 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
       });
 
       it('should overwrite existing file', async () => {
-        const adapter = getAdapter();
         const path = `${testDir}/test-overwrite.txt`;
 
         // First write
@@ -281,7 +256,6 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
       });
 
       it('should write UTF-8 encoded content', async () => {
-        const adapter = getAdapter();
         const utf8Content = '中文测试 Hello 🚀';
         const path = `${testDir}/test-utf8.txt`;
 

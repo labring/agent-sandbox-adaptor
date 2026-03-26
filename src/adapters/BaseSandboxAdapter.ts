@@ -30,7 +30,7 @@ import type {
  * Subclasses can override the polyfill service in their constructor.
  */
 export abstract class BaseSandboxAdapter implements ISandbox {
-  abstract readonly id: SandboxId;
+  abstract readonly id?: SandboxId;
   abstract readonly provider: string;
 
   protected _status: SandboxStatus = { state: 'Creating' };
@@ -63,7 +63,21 @@ export abstract class BaseSandboxAdapter implements ISandbox {
       await this.sleep(checkInterval);
     }
 
-    throw new SandboxReadyTimeoutError(this.id, timeoutMs);
+    throw new SandboxReadyTimeoutError(this.id ?? 'Unknown', timeoutMs);
+  }
+  async waitUntilDeleted(timeoutMs: number = 120000): Promise<void> {
+    const startTime = Date.now();
+    const checkInterval = 1000;
+
+    while (Date.now() - startTime < timeoutMs) {
+      const data = await this.getInfo().catch(() => true);
+      if (!data) {
+        return;
+      }
+      await this.sleep(checkInterval);
+    }
+
+    throw new SandboxReadyTimeoutError(this.id ?? 'Unknown', timeoutMs);
   }
 
   async renewExpiration(_additionalSeconds: number): Promise<void> {
