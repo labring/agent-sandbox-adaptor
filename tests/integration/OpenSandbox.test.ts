@@ -5,14 +5,21 @@ import {
   type OpenSandboxConfigType,
   type OpenSandboxConnectionConfig
 } from '@/adapters';
+import { SandboxRuntimeType } from '@/adapters/OpenSandboxAdapter';
 
-const shouldRun = Boolean(process.env.OPENSANDBOX_BASE_URL);
+const shouldRun = Boolean(
+  process.env.OPENSANDBOX_BASE_URL &&
+  process.env.OPENSANDBOX_IMAGE_REPOSITORY &&
+  process.env.OPENSANDBOX_RUNTIME
+);
 
 describe.skipIf(!shouldRun).sequential('OpenSandboxAdapter Integration Tests', () => {
   const sessionId = crypto.randomUUID();
   const connectionConfig: OpenSandboxConnectionConfig = {
-    baseUrl: process.env.OPENSANDBOX_BASE_URL,
-    runtime: 'docker',
+    sessionId,
+    baseUrl: process.env.OPENSANDBOX_BASE_URL!,
+    apiKey: process.env.OPENSANDBOX_API_KEY,
+    runtime: process.env.OPENSANDBOX_RUNTIME as SandboxRuntimeType,
     useServerProxy: true,
     requestTimeoutSeconds: 60
   };
@@ -21,25 +28,12 @@ describe.skipIf(!shouldRun).sequential('OpenSandboxAdapter Integration Tests', (
     readyTimeoutSeconds: 60,
     healthCheckPollingInterval: 500,
     image: {
-      repository: 'fastgpt-agent-sandbox',
-      tag: 'docker'
-    },
-    entrypoint: ['/opt/sync-agent/docker-entrypoint.sh'],
-    env: {
-      FASTGPT_SESSION_ID: sessionId,
-      FASTGPT_MINIO_ENDPOINT: process.env.OPENSANDBOX_MINIO_ENDPOINT ?? 'http://fastgpt-minio:9000',
-      FASTGPT_MINIO_ACCESS_KEY: process.env.OPENSANDBOX_MINIO_ACCESS_KEY ?? 'minioadmin',
-      FASTGPT_MINIO_SECRET_KEY: process.env.OPENSANDBOX_MINIO_SECRET_KEY ?? 'minioadmin',
-      FASTGPT_MINIO_BUCKET: process.env.OPENSANDBOX_MINIO_BUCKET ?? 'fastgpt-private',
-      FASTGPT_WORKDIR: process.env.OPENSANDBOX_WORKDIR ?? '/home/sandbox/workspace',
-      FASTGPT_SYNC_PATH: process.env.OPENSANDBOX_SYNC_PATH ?? '/home/sandbox/workspace',
-      FASTGPT_ENABLE_CODE_SERVER: process.env.OPENSANDBOX_ENABLE_CODE_SERVER ?? 'true'
+      repository: process.env.OPENSANDBOX_IMAGE_REPOSITORY!,
+      tag: process.env.OPENSANDBOX_IMAGE_TAG!
     },
     metadata: {
       skillId: crypto.randomUUID(),
-      teamId: crypto.randomUUID(),
-      sandboxType: 'editDebug',
-      sessionId: sessionId
+      teamId: crypto.randomUUID()
     }
   };
 
@@ -61,7 +55,7 @@ describe.skipIf(!shouldRun).sequential('OpenSandboxAdapter Integration Tests', (
   describe('Basic Tests', () => {
     it('should initialize with the expected OpenSandbox configuration', () => {
       expect(adapter.provider).toBe('opensandbox');
-      expect(adapter.runtime).toBe('docker');
+      expect(adapter.runtime).toBe(process.env.OPENSANDBOX_RUNTIME);
     });
   });
 

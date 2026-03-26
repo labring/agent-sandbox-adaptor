@@ -2,6 +2,8 @@ import {
   ConnectionConfig,
   ExecutionHandlers,
   Sandbox,
+  SandboxException,
+  SandboxManager,
   type Endpoint as SdkEndpoint
 } from '../../../opensandbox';
 import {
@@ -40,8 +42,10 @@ export type SandboxRuntimeType = 'docker' | 'kubernetes';
  * Connection configuration options for OpenSandboxAdapter.
  */
 export interface OpenSandboxConnectionConfig {
+  sessionId: string;
+
   /** Base URL for the OpenSandbox API */
-  baseUrl?: string;
+  baseUrl: string;
   /** API key for authentication */
   apiKey?: string;
   /** SDK request timeout in seconds */
@@ -83,11 +87,11 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
 
   private _sandbox?: Sandbox;
   private _connection: ConnectionConfig;
-  private _id: SandboxId = '';
+  private _id?: SandboxId;
 
   constructor(
-    private connectionConfig: OpenSandboxConnectionConfig = {},
-    private createConfig?: OpenSandboxConfigType
+    private connectionConfig: OpenSandboxConnectionConfig,
+    private createConfig: OpenSandboxConfigType
   ) {
     super();
     this.runtime = connectionConfig.runtime ?? 'docker';
@@ -95,8 +99,13 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
     this.polyfillService = new CommandPolyfillService(this);
   }
 
-  get id(): SandboxId {
+  get id(): SandboxId | undefined {
     return this._id;
+  }
+
+  private set sandbox(sandbox: Sandbox | undefined) {
+    this._sandbox = sandbox;
+    this._id = sandbox?.id;
   }
 
   private get sandbox(): Sandbox {
@@ -112,10 +121,6 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
 
   private createConnectionConfig(): ConnectionConfig {
     const { baseUrl, apiKey, requestTimeoutSeconds, debug, useServerProxy } = this.connectionConfig;
-
-    if (!baseUrl) {
-      return new ConnectionConfig({ apiKey, requestTimeoutSeconds, debug, useServerProxy });
-    }
 
     return new ConnectionConfig({
       domain: baseUrl,
@@ -258,16 +263,57 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
   }
 
   // ==================== Lifecycle Methods ====================
+  private async getSandboxBySessionId(): Promise<
+    { id: string; status: SandboxStatus } | undefined
+  > {
+    const manager = SandboxManager.create({ connectionConfig: this._connection });
+    const result = await manager.listSandboxInfos({
+      metadata: { sessionId: this.connectionConfig.sessionId }
+    });
+    const val = result.items[0];
 
+    if (val) {
+      const status = this.mapStatus(val.status);
+
+      return {
+        id: val.id,
+        status
+      };
+    }
+  }
   async ensureRunning(): Promise<void> {
-    return this.create();
+    const sandbox = await this.getSandboxBySessionId();
+
+    if (sandbox) {
+      switch (sandbox.status.state) {
+        case 'UnExist':
+          await this.create();
+          break;
+        case 'Running':
+          await this.connect(sandbox.id);
+          break;
+        case 'Creating':
+        case 'Starting':
+          await this.waitUntilReady();
+          break;
+        case 'Stopping':
+        case 'Stopped':
+          await this.resume(sandbox.id);
+          break;
+        case 'Deleting':
+          await this.waitUntilDeleted();
+          await this.create();
+          break;
+        case 'Error':
+          throw new ConnectionError(`Sandbox error: ${sandbox.status.message}`);
+        default:
+          throw new ConnectionError(`Sandbox state ${sandbox.status.state} not supported`);
+      }
+    } else {
+      await this.create();
+    }
   }
   async create(): Promise<void> {
-    if (!this.createConfig) {
-      throw new Error(
-        'createConfig is required to create a sandbox. Pass it as the third argument to createSandbox().'
-      );
-    }
     const cfg = this.createConfig;
     try {
       this._status = { state: 'Creating' };
@@ -275,21 +321,24 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
       const image = this.convertImageSpec(cfg.image);
       const resource = this.convertResourceLimits(cfg.resourceLimits);
 
-      this._sandbox = await Sandbox.create({
+      this.sandbox = await Sandbox.create({
         connectionConfig: this._connection,
         image,
         entrypoint: cfg.entrypoint,
         timeoutSeconds: cfg.timeoutSeconds ?? null,
         resource,
         env: cfg.env,
-        metadata: cfg.metadata,
+        metadata: {
+          ...cfg.metadata,
+          sessionId: this.connectionConfig.sessionId
+        },
         volumes: cfg.volumes,
         skipHealthCheck: cfg.skipHealthCheck,
         readyTimeoutSeconds: cfg.readyTimeoutSeconds,
         healthCheckPollingInterval: cfg.healthCheckPollingInterval
       });
 
-      this._id = this._sandbox.id;
+      await this.waitUntilReady();
       this._status = { state: 'Running' };
     } catch (error) {
       this._status = { state: 'Error', message: String(error) };
@@ -301,15 +350,13 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
     try {
       this._status = { state: 'Starting' };
 
-      this._sandbox = await Sandbox.connect({
+      this.sandbox = await Sandbox.connect({
         sandboxId,
         connectionConfig: this._connection,
         skipHealthCheck: this.createConfig?.skipHealthCheck,
         readyTimeoutSeconds: this.createConfig?.readyTimeoutSeconds,
         healthCheckPollingInterval: this.createConfig?.healthCheckPollingInterval
       });
-
-      this._id = this._sandbox.id;
       this._status = { state: 'Running' };
     } catch (error) {
       this._status = { state: 'Error', message: String(error) };
@@ -321,31 +368,53 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
     }
   }
 
+  private async resume(sandboxId: string): Promise<void> {
+    try {
+      this._status = { state: 'Starting' };
+      this.sandbox = await Sandbox.resume({
+        sandboxId,
+        connectionConfig: this._connection,
+        skipHealthCheck: this.createConfig?.skipHealthCheck,
+        readyTimeoutSeconds: this.createConfig?.readyTimeoutSeconds,
+        healthCheckPollingInterval: this.createConfig?.healthCheckPollingInterval
+      });
+      this._status = { state: 'Running' };
+    } catch (error) {
+      this._status = { state: 'Error', message: String(error) };
+      throw new ConnectionError(
+        `Failed to resume sandbox ${sandboxId}`,
+        this.connectionConfig.baseUrl,
+        error
+      );
+    }
+  }
+
   async start(): Promise<void> {
     try {
       this._status = { state: 'Starting' };
       // OpenSandbox resume returns a fresh Sandbox instance
-      this._sandbox = await this.sandbox.resume();
-      this._id = this.sandbox.id;
+      this.sandbox = await this.sandbox.resume();
+      await this.waitUntilReady();
       this._status = { state: 'Running' };
     } catch (error) {
-      if (
-        error &&
-        typeof error === 'object' &&
-        'code' in error &&
-        error.code === 'SANDBOX::API_NOT_SUPPORTED'
-      ) {
-        throw new FeatureNotSupportedError(
-          'Start/resume not supported by this runtime',
-          'start',
-          this.provider
-        );
+      const code = error instanceof SandboxException ? error.error.code : undefined;
+
+      switch (code) {
+        case 'DOCKER::SANDBOX_NOT_PAUSED':
+          return;
+        case 'SANDBOX::API_NOT_SUPPORTED':
+          throw new FeatureNotSupportedError(
+            'Start/resume not supported by this runtime',
+            'start',
+            this.provider
+          );
+        default:
+          throw new CommandExecutionError(
+            'Failed to start sandbox',
+            'start',
+            error instanceof Error ? error : undefined
+          );
       }
-      throw new CommandExecutionError(
-        'Failed to start sandbox',
-        'start',
-        error instanceof Error ? error : undefined
-      );
     }
   }
 
@@ -355,6 +424,12 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
       await this.sandbox.pause();
       this._status = { state: 'Stopped' };
     } catch (error) {
+      const message = error instanceof SandboxException ? error.error.message : undefined;
+
+      if (message?.includes('already paused')) {
+        return;
+      }
+
       if (
         error &&
         typeof error === 'object' &&
@@ -379,8 +454,7 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
     try {
       this._status = { state: 'Deleting' };
       await this.sandbox.kill();
-      this._sandbox = undefined;
-      this._id = '';
+      this.sandbox = undefined;
       this._status = { state: 'UnExist' };
     } catch (error) {
       throw new CommandExecutionError(
@@ -397,9 +471,7 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
    * Use this to disconnect from a sandbox without destroying it.
    */
   async close(): Promise<void> {
-    if (this._sandbox) {
-      await this._sandbox.close();
-    }
+    await this.sandbox.close();
   }
 
   /**
@@ -409,14 +481,7 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
    */
   async getEndpoint(port: number): Promise<Endpoint> {
     const sdkEndpoint = (await this.sandbox.getEndpoint(port)) as SdkEndpoint;
-    return this.convertSdkEndpoint(sdkEndpoint, port);
-  }
 
-  /**
-   * Convert SDK Endpoint (no-scheme string) to our Endpoint type.
-   * SDK format: "localhost:44772" or "domain/route/.../44772"
-   */
-  private convertSdkEndpoint(sdkEndpoint: SdkEndpoint, requestedPort: number): Endpoint {
     const raw = sdkEndpoint.endpoint;
     const colonIdx = raw.lastIndexOf(':');
     const hasPathBeforeColon = colonIdx !== -1 && raw.slice(0, colonIdx).includes('/');
@@ -425,23 +490,24 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
       // "host:port" format
       const host = raw.slice(0, colonIdx);
       const parsedPort = parseInt(raw.slice(colonIdx + 1), 10);
-      const port = isNaN(parsedPort) ? requestedPort : parsedPort;
+      const portNumber = isNaN(parsedPort) ? port : parsedPort;
       const protocol: 'http' | 'https' = port === 443 ? 'https' : 'http';
-      return { host, port, protocol, url: `${protocol}://${raw}` };
+      return { host, port: portNumber, protocol, url: `${protocol}://${raw}` };
     }
 
     // Path-based routing: "domain/route/.../44772" (reverse proxy with HTTPS)
     return {
       host: raw,
-      port: requestedPort,
+      port: port,
       protocol: 'https',
       url: `https://${raw}`
     };
   }
 
   async getInfo(): Promise<SandboxInfo | null> {
-    if (!this._sandbox) return null;
-
+    if (!this._sandbox) {
+      return null;
+    }
     try {
       const info = await this.sandbox.getInfo();
       return {
@@ -483,7 +549,6 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
   }
 
   // ==================== Command Execution ====================
-
   async execute(command: string, options?: ExecuteOptions): Promise<ExecuteResult> {
     try {
       const execution = await this.sandbox.commands.run(command, {

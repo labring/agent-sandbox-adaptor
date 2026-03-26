@@ -50,7 +50,7 @@ export function createSandbox<P extends SandboxProviderType>(
     case 'opensandbox':
       return new OpenSandboxAdapter(
         config as OpenSandboxConnectionConfig,
-        createConfig as OpenSandboxConfigType | undefined
+        createConfig as OpenSandboxConfigType
       );
 
     case 'sealosdevbox':
