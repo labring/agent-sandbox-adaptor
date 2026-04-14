@@ -18,16 +18,51 @@ export class CommandPolyfillService {
   // ==================== File Read Operations ====================
 
   /**
-   * Read a file via base64 encoding.
-   * Uses: cat <file> | base64
+   * Chunk size used when reading files through command execution. Each chunk
+   * produces a base64-encoded stdout of roughly `READ_CHUNK_SIZE * 4 / 3`
+   * bytes, which must fit within the executor's stdout byte cap (default
+   * 1 MiB) with room to spare.
+   */
+  private static readonly READ_CHUNK_SIZE = 256 * 1024;
+
+  /**
+   * Read a file in chunks via `dd | base64`. Uses `stat` to discover the file
+   * size, then issues range reads so that no single command's stdout exceeds
+   * the executor's bounded output limit.
+   *
+   * Falls back to a single `cat | base64` read when `stat` fails (e.g. when
+   * the sandbox lacks GNU stat). That fallback is bounded by the caller's
+   * `maxOutputBytes`, so very large files require stat-based chunking.
    */
   async readFile(path: string): Promise<Uint8Array> {
     try {
-      const result = await this.executor.execute(`cat "${this.escapePath(path)}" | base64 -w 0`);
-      if (result.exitCode !== 0) {
-        throw this.createFileError(path, result.stderr);
+      const size = await this.statSize(path);
+      if (size === undefined) {
+        const result = await this.executor.execute(`cat "${this.escapePath(path)}" | base64 -w 0`);
+        if (result.exitCode !== 0) {
+          throw this.createFileError(path, result.stderr);
+        }
+        return base64ToBytes(result.stdout);
       }
-      return base64ToBytes(result.stdout);
+
+      if (size === 0) return new Uint8Array();
+
+      const chunks: Uint8Array[] = [];
+      let totalLength = 0;
+      for (let offset = 0; offset < size; offset += CommandPolyfillService.READ_CHUNK_SIZE) {
+        const end = Math.min(offset + CommandPolyfillService.READ_CHUNK_SIZE, size);
+        const chunk = await this.readFileRange(path, offset, end);
+        chunks.push(chunk);
+        totalLength += chunk.length;
+      }
+
+      const combined = new Uint8Array(totalLength);
+      let writeOffset = 0;
+      for (const chunk of chunks) {
+        combined.set(chunk, writeOffset);
+        writeOffset += chunk.length;
+      }
+      return combined;
     } catch (error) {
       if (error instanceof FileOperationError) {
         throw error;
@@ -40,13 +75,33 @@ export class CommandPolyfillService {
   }
 
   /**
-   * Read a portion of a file via dd + base64.
+   * Return the file size in bytes, or undefined if stat fails (e.g. the file
+   * does not exist or stat is unavailable).
+   */
+  private async statSize(path: string): Promise<number | undefined> {
+    const result = await this.executor.execute(
+      `stat -c '%s' "${this.escapePath(path)}" 2>/dev/null || echo STAT_FAILED`
+    );
+    const stdout = result.stdout.trim();
+    if (!stdout || stdout.includes('STAT_FAILED')) return undefined;
+    const parsed = Number.parseInt(stdout, 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+  }
+
+  /**
+   * Read a portion of a file via `tail -c +N | head -c M | base64`.
+   *
+   * `tail -c +N` emits bytes starting at position N (1-indexed). `head -c M`
+   * caps the length. Both are POSIX-ish and avoid the `dd bs=1` one-syscall-
+   * per-byte trap that made the old implementation unusable for large reads.
    */
   async readFileRange(path: string, start: number, end?: number): Promise<Uint8Array> {
-    const length = end ? end - start : '';
-    const cmd = `dd if="${this.escapePath(
-      path
-    )}" bs=1 skip=${start} count=${length} 2>/dev/null | base64 -w 0`;
+    const escaped = this.escapePath(path);
+    const tailPos = start + 1; // tail -c uses 1-indexed byte position
+    const cmd =
+      end !== undefined
+        ? `tail -c +${tailPos} "${escaped}" | head -c ${end - start} | base64 -w 0`
+        : `tail -c +${tailPos} "${escaped}" | base64 -w 0`;
 
     const result = await this.executor.execute(cmd);
     if (result.exitCode !== 0) {
@@ -62,14 +117,42 @@ export class CommandPolyfillService {
    * Uses: echo <base64> | base64 -d > <file>
    */
   async writeFile(path: string, data: Uint8Array): Promise<number> {
+    await this.appendBytes(path, data, { truncate: true });
+    return data.length;
+  }
+
+  /**
+   * Append `data` to `path`, chunking the base64 payload to stay under the
+   * shell command line length limit. Set `truncate` to rewrite the file
+   * from scratch on the first append.
+   *
+   * Parent directory creation runs once when `truncate` is set, so streaming
+   * writes pay the mkdir cost only on the first chunk.
+   */
+  async appendBytes(
+    path: string,
+    data: Uint8Array,
+    options?: { truncate?: boolean }
+  ): Promise<void> {
+    if (options?.truncate) {
+      await this.createParentDirectory(path);
+    }
+
+    if (data.length === 0) {
+      if (options?.truncate) {
+        // Create/truncate the file even if there's nothing to write.
+        const result = await this.executor.execute(`: > "${this.escapePath(path)}"`);
+        if (result.exitCode !== 0) {
+          throw this.createFileError(path, result.stderr);
+        }
+      }
+      return;
+    }
+
     const base64 = bytesToBase64(data);
     const chunkSize = 1024; // Avoid command line length limits
+    let first = Boolean(options?.truncate);
 
-    // Ensure parent directory exists
-    await this.createParentDirectory(path);
-
-    // Write in chunks to avoid command length limits
-    let first = true;
     for (let i = 0; i < base64.length; i += chunkSize) {
       const chunk = base64.slice(i, i + chunkSize);
       const redirect = first ? '>' : '>>';
@@ -81,8 +164,6 @@ export class CommandPolyfillService {
       }
       first = false;
     }
-
-    return data.length;
   }
 
   /**

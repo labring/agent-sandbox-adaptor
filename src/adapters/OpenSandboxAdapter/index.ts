@@ -29,7 +29,10 @@ import type {
 } from '@/types';
 import { BaseSandboxAdapter } from '../BaseSandboxAdapter';
 import { CommandPolyfillService } from '@/polyfill/CommandPolyfillService';
+import { BoundedOutputBuffer } from '@/utils/outputBuffer';
 import type { OpenSandboxConfigType } from './type';
+
+const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
 
 export type { OpenSandboxConfigType } from './type';
 
@@ -605,22 +608,34 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
 
   // ==================== Command Execution ====================
   async execute(command: string, options?: ExecuteOptions): Promise<ExecuteResult> {
+    const maxBytes = options?.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+    const stdoutBuf = new BoundedOutputBuffer(maxBytes);
+    const stderrBuf = new BoundedOutputBuffer(maxBytes);
+
     try {
-      const execution = await this.sandbox.commands.run(command, {
-        workingDirectory: this.normalizePath(options?.workingDirectory),
-        background: options?.background
-      });
+      const execution = await this.sandbox.commands.run(
+        command,
+        {
+          workingDirectory: this.normalizePath(options?.workingDirectory),
+          background: options?.background
+        },
+        {
+          onStdout: (msg) => {
+            stdoutBuf.append(msg.text);
+          },
+          onStderr: (msg) => {
+            stderrBuf.append(msg.text);
+          }
+        }
+      );
 
-      const stdout = execution.logs.stdout.map((msg) => msg.text).join('\n');
-      const stderr = execution.logs.stderr.map((msg) => msg.text).join('\n');
       const exitCode = this.extractExitCode(execution);
-
-      const stdoutLength = execution.logs.stdout.reduce((sum, msg) => sum + msg.text.length, 0);
-      const stderrLength = execution.logs.stderr.reduce((sum, msg) => sum + msg.text.length, 0);
-      const MaxOutputSize = 1024 * 1024;
-      const truncated = stdoutLength >= MaxOutputSize || stderrLength >= MaxOutputSize;
-
-      return { stdout, stderr, exitCode, truncated };
+      return {
+        stdout: stdoutBuf.toString(),
+        stderr: stderrBuf.toString(),
+        exitCode,
+        truncated: stdoutBuf.truncated || stderrBuf.truncated
+      };
     } catch (error) {
       if (error instanceof SandboxStateError) throw error;
       throw new CommandExecutionError(
@@ -636,10 +651,21 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
     handlers: StreamHandlers,
     options?: ExecuteOptions
   ): Promise<void> {
+    const wantsComplete = Boolean(handlers.onComplete);
+    const maxBytes = options?.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+    const stdoutBuf = wantsComplete ? new BoundedOutputBuffer(maxBytes) : undefined;
+    const stderrBuf = wantsComplete ? new BoundedOutputBuffer(maxBytes) : undefined;
+
     try {
       const sdkHandlers: ExecutionHandlers = {
-        ...(handlers.onStderr ? { onStderr: handlers.onStderr } : {}),
-        ...(handlers.onStdout ? { onStdout: handlers.onStdout } : {}),
+        onStdout: async (msg) => {
+          stdoutBuf?.append(msg.text);
+          await handlers.onStdout?.(msg);
+        },
+        onStderr: async (msg) => {
+          stderrBuf?.append(msg.text);
+          await handlers.onStderr?.(msg);
+        },
         ...(handlers.onError
           ? {
               onError: async (err) => {
@@ -663,17 +689,14 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
         sdkHandlers
       );
 
-      if (handlers.onComplete) {
-        const stdout = execution.logs.stdout.map((msg) => msg.text).join('\n');
-        const stderr = execution.logs.stderr.map((msg) => msg.text).join('\n');
+      if (handlers.onComplete && stdoutBuf && stderrBuf) {
         const exitCode = this.extractExitCode(execution);
-
-        const stdoutLength = execution.logs.stdout.reduce((sum, msg) => sum + msg.text.length, 0);
-        const stderrLength = execution.logs.stderr.reduce((sum, msg) => sum + msg.text.length, 0);
-        const MaxOutputSize = 1024 * 1024;
-        const truncated = stdoutLength >= MaxOutputSize || stderrLength >= MaxOutputSize;
-
-        await handlers.onComplete({ stdout, stderr, exitCode, truncated });
+        await handlers.onComplete({
+          stdout: stdoutBuf.toString(),
+          stderr: stderrBuf.toString(),
+          exitCode,
+          truncated: stdoutBuf.truncated || stderrBuf.truncated
+        });
       }
     } catch (error) {
       throw new CommandExecutionError(
