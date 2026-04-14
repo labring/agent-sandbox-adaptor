@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { OpenSandboxAdapter } from '@/adapters/OpenSandboxAdapter';
+import type { OpenSandboxConnectionConfig } from '@/adapters/OpenSandboxAdapter';
 import { ConnectionError, SandboxStateError } from '@/errors';
 import type { ImageSpec, ResourceLimits } from '@/types';
 import type { OpenSandboxConfigType } from '@/adapters/OpenSandboxAdapter/type';
+
+const MINIMAL_CONNECTION: OpenSandboxConnectionConfig = {
+  sessionId: 'test-session',
+  baseUrl: 'http://localhost'
+};
+
+function makeAdapter(extra?: Partial<OpenSandboxConnectionConfig>): OpenSandboxAdapter {
+  return new OpenSandboxAdapter({ ...MINIMAL_CONNECTION, ...extra });
+}
 
 /**
  * Unit tests for OpenSandboxAdapter.
@@ -12,27 +22,15 @@ import type { OpenSandboxConfigType } from '@/adapters/OpenSandboxAdapter/type';
  */
 describe('OpenSandboxAdapter', () => {
   describe('Lifecycle Methods', () => {
-    it('should initialize with correct default values', () => {
-      const adapter = new OpenSandboxAdapter();
-
-      expect(adapter.provider).toBe('opensandbox');
-      expect(adapter.id).toBe('');
-      expect(adapter.status.state).toBe('Creating');
-    });
-
     it('should initialize with custom connection config', () => {
-      const adapter = new OpenSandboxAdapter({
-        baseUrl: 'https://api.example.com',
-        apiKey: 'test-api-key'
-      });
+      const adapter = makeAdapter({ apiKey: 'test-api-key' });
 
       expect(adapter.provider).toBe('opensandbox');
       expect(adapter.status.state).toBe('Creating');
     });
 
     it('should pass server proxy settings into ConnectionConfig', () => {
-      const adapter = new OpenSandboxAdapter({
-        baseUrl: 'https://api.example.com',
+      const adapter = makeAdapter({
         apiKey: 'test-api-key',
         useServerProxy: true,
         requestTimeoutSeconds: 60,
@@ -54,7 +52,7 @@ describe('OpenSandboxAdapter', () => {
     });
 
     it('should throw SandboxStateError when accessing sandbox before initialization', async () => {
-      const adapter = new OpenSandboxAdapter();
+      const adapter = makeAdapter();
 
       // Attempting operations before create/connect should throw
       await expect(adapter.execute('echo test')).rejects.toThrow(SandboxStateError);
@@ -65,7 +63,10 @@ describe('OpenSandboxAdapter', () => {
       const config: OpenSandboxConfigType = {
         image: { repository: 'nginx', tag: 'latest' }
       };
-      const adapter = new OpenSandboxAdapter({ baseUrl: 'http://localhost:65530' }, config);
+      const adapter = new OpenSandboxAdapter(
+        { ...MINIMAL_CONNECTION, baseUrl: 'http://localhost:65530' },
+        config
+      );
 
       // Should throw an error when SDK fails
       try {
@@ -78,9 +79,7 @@ describe('OpenSandboxAdapter', () => {
     });
 
     it('should handle connect errors gracefully', async () => {
-      const adapter = new OpenSandboxAdapter({
-        baseUrl: 'http://localhost:65530'
-      });
+      const adapter = makeAdapter({ baseUrl: 'http://localhost:65530' });
 
       try {
         await adapter.connect('non-existent-sandbox-id');
@@ -89,28 +88,11 @@ describe('OpenSandboxAdapter', () => {
         expect(error instanceof ConnectionError || error instanceof Error).toBe(true);
       }
     });
-
-    it('should update status after lifecycle operations', async () => {
-      const adapter = new OpenSandboxAdapter();
-
-      // Status should be accessible
-      expect(adapter.status).toBeDefined();
-      expect([
-        'UnExist',
-        'Running',
-        'Creating',
-        'Starting',
-        'Stopping',
-        'Stopped',
-        'Deleting',
-        'Error'
-      ]).toContain(adapter.status.state);
-    });
   });
 
   describe('Image and Resource Conversion', () => {
     it('should convert ImageSpec to SDK format', () => {
-      const adapter = new OpenSandboxAdapter();
+      const adapter = makeAdapter();
 
       // Test tag format
       const imageWithTag: ImageSpec = { repository: 'nginx', tag: 'latest' };
@@ -141,7 +123,7 @@ describe('OpenSandboxAdapter', () => {
     });
 
     it('should parse SDK image string to ImageSpec', () => {
-      const adapter = new OpenSandboxAdapter();
+      const adapter = makeAdapter();
       const parseImageSpec = (adapter as unknown as { parseImageSpec(image: string): ImageSpec })
         .parseImageSpec;
 
@@ -163,7 +145,7 @@ describe('OpenSandboxAdapter', () => {
     });
 
     it('should convert ResourceLimits to SDK format', () => {
-      const adapter = new OpenSandboxAdapter();
+      const adapter = makeAdapter();
       const convertResourceLimits = (
         adapter as unknown as {
           convertResourceLimits(limits?: ResourceLimits): Record<string, string> | undefined;
@@ -195,7 +177,7 @@ describe('OpenSandboxAdapter', () => {
     });
 
     it('should parse SDK resource limits to ResourceLimits', () => {
-      const adapter = new OpenSandboxAdapter();
+      const adapter = makeAdapter();
       const parseResourceLimits = (
         adapter as unknown as {
           parseResourceLimits(resource?: Record<string, string>): ResourceLimits | undefined;
@@ -227,70 +209,10 @@ describe('OpenSandboxAdapter', () => {
     });
   });
 
-  describe('Sandbox Configuration', () => {
-    it('should handle SandboxConfig with all options', () => {
-      const _adapter = new OpenSandboxAdapter();
-
-      const fullConfig: OpenSandboxConfigType = {
-        image: { repository: 'node', tag: '18-alpine' },
-        entrypoint: ['node', 'app.js'],
-        timeout: 3600,
-        resourceLimits: {
-          cpuCount: 2,
-          memoryMiB: 1024,
-          diskGiB: 20
-        },
-        env: { NODE_ENV: 'production', PORT: '3000' },
-        metadata: { project: 'test', version: '1.0' }
-      };
-
-      // Config should be valid
-      expect(fullConfig.image.repository).toBe('node');
-      expect(fullConfig.timeout).toBe(3600);
-      expect(fullConfig.resourceLimits?.cpuCount).toBe(2);
-    });
-
-    it('should handle minimal SandboxConfig', () => {
-      const minimalConfig: OpenSandboxConfigType = {
-        image: { repository: 'alpine' }
-      };
-
-      expect(minimalConfig.image.repository).toBe('alpine');
-      expect(minimalConfig.timeout).toBeUndefined();
-    });
-  });
-
-  describe('Lifecycle State Management', () => {
-    it('should track status state correctly', () => {
-      const adapter = new OpenSandboxAdapter();
-
-      // Initial state
-      expect(adapter.status.state).toBe('Creating');
-
-      // States should be one of the valid values
-      const validStates = [
-        'UnExist',
-        'Running',
-        'Creating',
-        'Starting',
-        'Stopping',
-        'Stopped',
-        'Deleting',
-        'Error'
-      ];
-      expect(validStates).toContain(adapter.status.state);
-    });
-
-    it('should have empty id initially', () => {
-      const adapter = new OpenSandboxAdapter();
-      expect(adapter.id).toBe('');
-    });
-  });
-
   describe('Error Handling', () => {
     it('should wrap SDK errors in ConnectionError for create', async () => {
       const adapter = new OpenSandboxAdapter(
-        { baseUrl: 'http://localhost:1' }, // Invalid port
+        { ...MINIMAL_CONNECTION, baseUrl: 'http://localhost:1' }, // Invalid port
         { image: { repository: 'test' } }
       );
 
@@ -303,9 +225,7 @@ describe('OpenSandboxAdapter', () => {
     });
 
     it('should wrap SDK errors in ConnectionError for connect', async () => {
-      const adapter = new OpenSandboxAdapter({
-        baseUrl: 'http://localhost:1'
-      });
+      const adapter = makeAdapter({ baseUrl: 'http://localhost:1' });
 
       try {
         await adapter.connect('invalid-id');
@@ -335,17 +255,9 @@ describe('OpenSandboxAdapter', () => {
     });
   });
 
-  describe('Provider', () => {
-    it('should have unique provider name', () => {
-      const adapter = new OpenSandboxAdapter();
-      expect(adapter.provider).toBe('opensandbox');
-      expect(adapter.provider).not.toBe('minimal');
-    });
-  });
-
   describe('Wait Until Ready', () => {
     it('should timeout when sandbox not ready', async () => {
-      const adapter = new OpenSandboxAdapter();
+      const adapter = makeAdapter();
 
       // Without proper initialization, should timeout or error
       try {
@@ -359,68 +271,17 @@ describe('OpenSandboxAdapter', () => {
 
   describe('Runtime Configuration', () => {
     it('should default to docker runtime', () => {
-      const adapter = new OpenSandboxAdapter();
-
-      expect(adapter.runtime).toBe('docker');
+      expect(makeAdapter().runtime).toBe('docker');
     });
 
-    it('should accept docker runtime explicitly', () => {
-      const adapter = new OpenSandboxAdapter({ runtime: 'docker' });
-
-      expect(adapter.runtime).toBe('docker');
-    });
-
-    it('should accept kubernetes runtime', () => {
-      const adapter = new OpenSandboxAdapter({ runtime: 'kubernetes' });
-
-      expect(adapter.runtime).toBe('kubernetes');
-    });
-
-    it('should report correct provider for both runtimes', () => {
-      const dockerAdapter = new OpenSandboxAdapter({ runtime: 'docker' });
-      const k8sAdapter = new OpenSandboxAdapter({ runtime: 'kubernetes' });
-
-      expect(dockerAdapter.provider).toBe('opensandbox');
-      expect(k8sAdapter.provider).toBe('opensandbox');
-    });
-
-    it('should handle runtime with other connection config options', () => {
-      const adapter = new OpenSandboxAdapter({
-        baseUrl: 'https://api.example.com',
-        apiKey: 'test-api-key',
-        runtime: 'kubernetes'
-      });
-
-      expect(adapter.runtime).toBe('kubernetes');
-      expect(adapter.status.state).toBe('Creating');
-    });
-  });
-
-  describe('Runtime State Transitions', () => {
-    it('should track runtime type independently of status state', () => {
-      const dockerAdapter = new OpenSandboxAdapter({ runtime: 'docker' });
-      const k8sAdapter = new OpenSandboxAdapter({ runtime: 'kubernetes' });
-
-      // Both start with Creating state
-      expect(dockerAdapter.status.state).toBe('Creating');
-      expect(k8sAdapter.status.state).toBe('Creating');
-
-      // Runtime types are preserved
-      expect(dockerAdapter.runtime).toBe('docker');
-      expect(k8sAdapter.runtime).toBe('kubernetes');
-    });
-
-    it('should maintain runtime through lifecycle operations', async () => {
-      const adapter = new OpenSandboxAdapter({ runtime: 'kubernetes' });
-
-      // Runtime is immutable
-      expect(adapter.runtime).toBe('kubernetes');
+    it('should accept kubernetes runtime explicitly', () => {
+      expect(makeAdapter({ runtime: 'kubernetes' }).runtime).toBe('kubernetes');
     });
   });
 
   describe('getInfo', () => {
     it('should return null when sandbox not initialized', async () => {
-      const adapter = new OpenSandboxAdapter();
+      const adapter = makeAdapter();
       const info = await adapter.getInfo();
       expect(info).toBeNull();
     });
