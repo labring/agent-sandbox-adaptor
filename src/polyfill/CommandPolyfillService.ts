@@ -79,8 +79,9 @@ export class CommandPolyfillService {
    * does not exist or stat is unavailable).
    */
   private async statSize(path: string): Promise<number | undefined> {
+    // GNU stat uses -c '%s', BSD/macOS stat uses -f '%z'.
     const result = await this.executor.execute(
-      `stat -c '%s' "${this.escapePath(path)}" 2>/dev/null || echo STAT_FAILED`
+      `stat -c '%s' "${this.escapePath(path)}" 2>/dev/null || stat -f '%z' "${this.escapePath(path)}" 2>/dev/null || echo STAT_FAILED`
     );
     const stdout = result.stdout.trim();
     if (!stdout || stdout.includes('STAT_FAILED')) return undefined;

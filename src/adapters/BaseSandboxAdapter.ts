@@ -355,15 +355,16 @@ export abstract class BaseSandboxAdapter implements ISandbox {
   }
 
   /**
-   * Append a ReadableStream to a file one chunk at a time. Uses the polyfill
-   * to truncate on the first chunk and append on subsequent chunks, so the
-   * full stream is never held in memory.
+   * Stream a ReadableStream into a file via a temporary file that is
+   * atomically renamed on success. If the stream fails mid-write, the
+   * original file is left untouched and the temp file is cleaned up.
    */
   private async writeStreamToFile(
     polyfillService: CommandPolyfillService,
     path: string,
     stream: ReadableStream<Uint8Array>
   ): Promise<number> {
+    const tmpPath = `${path}.tmp.${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
     const reader = stream.getReader();
     let totalBytes = 0;
     let first = true;
@@ -373,15 +374,22 @@ export abstract class BaseSandboxAdapter implements ISandbox {
         if (done) break;
         if (!value || value.length === 0) continue;
 
-        await polyfillService.appendBytes(path, value, first ? { truncate: true } : undefined);
+        await polyfillService.appendBytes(tmpPath, value, first ? { truncate: true } : undefined);
         totalBytes += value.length;
         first = false;
       }
 
       // Ensure the file exists even if the stream yielded nothing.
       if (first) {
-        await polyfillService.appendBytes(path, new Uint8Array(), { truncate: true });
+        await polyfillService.appendBytes(tmpPath, new Uint8Array(), { truncate: true });
       }
+
+      // Atomic rename — same directory guarantees same filesystem.
+      await polyfillService.moveFiles([{ source: tmpPath, destination: path }]);
+    } catch (error) {
+      // Best-effort cleanup of the temp file.
+      await polyfillService.deleteFiles([tmpPath]).catch(() => {});
+      throw error;
     } finally {
       reader.releaseLock();
     }

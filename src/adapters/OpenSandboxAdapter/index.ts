@@ -609,8 +609,8 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
   // ==================== Command Execution ====================
   async execute(command: string, options?: ExecuteOptions): Promise<ExecuteResult> {
     const maxBytes = options?.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
-    const stdoutBuf = new BoundedOutputBuffer(maxBytes);
-    const stderrBuf = new BoundedOutputBuffer(maxBytes);
+    const stdoutBuf = new BoundedOutputBuffer(maxBytes, '\n');
+    const stderrBuf = new BoundedOutputBuffer(maxBytes, '\n');
 
     try {
       const execution = await this.sandbox.commands.run(
@@ -653,19 +653,30 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
   ): Promise<void> {
     const wantsComplete = Boolean(handlers.onComplete);
     const maxBytes = options?.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
-    const stdoutBuf = wantsComplete ? new BoundedOutputBuffer(maxBytes) : undefined;
-    const stderrBuf = wantsComplete ? new BoundedOutputBuffer(maxBytes) : undefined;
+    const stdoutBuf = wantsComplete ? new BoundedOutputBuffer(maxBytes, '\n') : undefined;
+    const stderrBuf = wantsComplete ? new BoundedOutputBuffer(maxBytes, '\n') : undefined;
 
     try {
       const sdkHandlers: ExecutionHandlers = {
-        onStdout: async (msg) => {
-          stdoutBuf?.append(msg.text);
-          await handlers.onStdout?.(msg);
-        },
-        onStderr: async (msg) => {
-          stderrBuf?.append(msg.text);
-          await handlers.onStderr?.(msg);
-        },
+        // Only inject onStdout/onStderr when the caller registered them or we
+        // need to capture output for onComplete — avoids changing SDK behaviour
+        // (e.g. buffering strategy) when no handlers are needed.
+        ...(handlers.onStdout || wantsComplete
+          ? {
+              onStdout: async (msg) => {
+                stdoutBuf?.append(msg.text);
+                await handlers.onStdout?.(msg);
+              }
+            }
+          : {}),
+        ...(handlers.onStderr || wantsComplete
+          ? {
+              onStderr: async (msg) => {
+                stderrBuf?.append(msg.text);
+                await handlers.onStderr?.(msg);
+              }
+            }
+          : {}),
         ...(handlers.onError
           ? {
               onError: async (err) => {
@@ -689,13 +700,13 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
         sdkHandlers
       );
 
-      if (handlers.onComplete && stdoutBuf && stderrBuf) {
+      if (wantsComplete) {
         const exitCode = this.extractExitCode(execution);
-        await handlers.onComplete({
-          stdout: stdoutBuf.toString(),
-          stderr: stderrBuf.toString(),
+        await handlers.onComplete!({
+          stdout: stdoutBuf!.toString(),
+          stderr: stderrBuf!.toString(),
           exitCode,
-          truncated: stdoutBuf.truncated || stderrBuf.truncated
+          truncated: stdoutBuf!.truncated || stderrBuf!.truncated
         });
       }
     } catch (error) {

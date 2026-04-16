@@ -17,18 +17,49 @@ export class BoundedOutputBuffer {
   private currentBytes = 0;
   private _totalBytes = 0;
   private _truncated = false;
+  private readonly separatorBuf: Buffer | undefined;
 
-  constructor(private readonly maxBytes: number) {
+  /**
+   * @param maxBytes  Maximum retained bytes.
+   * @param separator Optional string inserted between consecutive appends
+   *                  (e.g. `'\n'` to replicate the old `join('\n')` behaviour).
+   */
+  constructor(
+    private readonly maxBytes: number,
+    separator?: string
+  ) {
     if (!(maxBytes > 0)) {
       throw new Error(`BoundedOutputBuffer: maxBytes must be > 0 (got ${maxBytes})`);
+    }
+    if (separator) {
+      this.separatorBuf = Buffer.from(separator, 'utf8');
     }
   }
 
   append(text: string): void {
     if (!text) return;
 
-    const chunk = Buffer.from(text, 'utf8');
-    this._totalBytes += chunk.length;
+    const needsSep = this.separatorBuf && this.chunks.length > 0;
+    const textBuf = Buffer.from(text, 'utf8');
+    const sepLen = needsSep ? this.separatorBuf!.length : 0;
+
+    this._totalBytes += textBuf.length + sepLen;
+
+    // Fast path: a single append that exceeds maxBytes. Discard all existing
+    // chunks and keep only the tail of the text, avoiding a transient memory
+    // spike from pushing an oversized buffer alongside existing data.
+    if (textBuf.length + sepLen > this.maxBytes) {
+      this._truncated = true;
+      const keep = Math.min(textBuf.length, this.maxBytes);
+      this.chunks = [
+        keep < textBuf.length ? Buffer.from(textBuf.subarray(textBuf.length - keep)) : textBuf
+      ];
+      this.currentBytes = keep;
+      return;
+    }
+
+    // Prepend separator between consecutive appends (mirrors Array#join).
+    const chunk = needsSep ? Buffer.concat([this.separatorBuf!, textBuf]) : textBuf;
     this.chunks.push(chunk);
     this.currentBytes += chunk.length;
 
@@ -46,6 +77,18 @@ export class BoundedOutputBuffer {
       const overflow = this.currentBytes - this.maxBytes;
       this.chunks[0] = this.chunks[0].subarray(overflow);
       this.currentBytes -= overflow;
+    }
+
+    // After head truncation, the new first chunk may start with a separator
+    // left over from a dropped predecessor. Strip it so the output doesn't
+    // begin with a spurious delimiter.
+    if (this.separatorBuf && this.chunks.length > 0) {
+      const first = this.chunks[0];
+      const sep = this.separatorBuf;
+      if (first.subarray(0, sep.length).equals(sep)) {
+        this.chunks[0] = first.subarray(sep.length);
+        this.currentBytes -= sep.length;
+      }
     }
   }
 
