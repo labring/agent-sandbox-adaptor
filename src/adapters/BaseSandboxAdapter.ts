@@ -208,24 +208,9 @@ export abstract class BaseSandboxAdapter implements ISandbox {
           const arrayBuffer = await entry.data.arrayBuffer();
           bytesWritten = await polyfillService.writeFile(entry.path, new Uint8Array(arrayBuffer));
         } else {
-          // ReadableStream
-          const chunks: Uint8Array[] = [];
-          const reader = entry.data.getReader();
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              break;
-            }
-            chunks.push(value);
-          }
-          const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
-          const combined = new Uint8Array(totalLength);
-          let offset = 0;
-          for (const chunk of chunks) {
-            combined.set(chunk, offset);
-            offset += chunk.length;
-          }
-          bytesWritten = await polyfillService.writeFile(entry.path, combined);
+          // ReadableStream — append chunk-by-chunk so we never buffer the
+          // full stream in memory.
+          bytesWritten = await this.writeStreamToFile(polyfillService, entry.path, entry.data);
         }
 
         results.push({ path: entry.path, bytesWritten, error: null });
@@ -362,26 +347,53 @@ export abstract class BaseSandboxAdapter implements ISandbox {
   }
 
   async writeFileStream(path: string, stream: ReadableStream<Uint8Array>): Promise<void> {
-    // Collect stream then write
+    const polyfillService = this.requirePolyfillService(
+      'writeFileStream',
+      'File stream write not supported by this provider'
+    );
+    await this.writeStreamToFile(polyfillService, this.normalizePath(path), stream);
+  }
+
+  /**
+   * Stream a ReadableStream into a file via a temporary file that is
+   * atomically renamed on success. If the stream fails mid-write, the
+   * original file is left untouched and the temp file is cleaned up.
+   */
+  private async writeStreamToFile(
+    polyfillService: CommandPolyfillService,
+    path: string,
+    stream: ReadableStream<Uint8Array>
+  ): Promise<number> {
+    const tmpPath = `${path}.tmp.${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
     const reader = stream.getReader();
-    const chunks: Uint8Array[] = [];
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
+    let totalBytes = 0;
+    let first = true;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value || value.length === 0) continue;
+
+        await polyfillService.appendBytes(tmpPath, value, first ? { truncate: true } : undefined);
+        totalBytes += value.length;
+        first = false;
       }
-      chunks.push(value);
-    }
 
-    const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
-    const combined = new Uint8Array(totalLength);
-    let offset = 0;
-    for (const chunk of chunks) {
-      combined.set(chunk, offset);
-      offset += chunk.length;
-    }
+      // Ensure the file exists even if the stream yielded nothing.
+      if (first) {
+        await polyfillService.appendBytes(tmpPath, new Uint8Array(), { truncate: true });
+      }
 
-    await this.writeFiles([{ path, data: combined }]);
+      // Atomic rename — same directory guarantees same filesystem.
+      await polyfillService.moveFiles([{ source: tmpPath, destination: path }]);
+    } catch (error) {
+      // Best-effort cleanup of the temp file.
+      await polyfillService.deleteFiles([tmpPath]).catch(() => {});
+      throw error;
+    } finally {
+      reader.releaseLock();
+    }
+    return totalBytes;
   }
 
   // ==================== Metadata Operations ====================

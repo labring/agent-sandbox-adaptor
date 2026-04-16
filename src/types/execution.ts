@@ -16,6 +16,17 @@ export interface ExecuteOptions {
 
   /** Abort signal for cancellation */
   signal?: AbortSignal;
+
+  /**
+   * Maximum number of bytes to retain in stdout / stderr for the returned
+   * {@link ExecuteResult}. Output beyond this limit is dropped (oldest first)
+   * and `truncated` is set to true. Streaming handlers (`onStdout` / `onStderr`)
+   * still receive every chunk regardless of this limit.
+   *
+   * Defaults to 1 MiB per stream. Set a larger value for commands whose full
+   * output you need, bearing in mind the memory cost.
+   */
+  maxOutputBytes?: number;
 }
 
 /**
