@@ -34,6 +34,15 @@ import type { OpenSandboxConfigType } from './type';
 
 const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
 
+/** Read uid/gid from SANDBOX_UID / SANDBOX_GID env vars. */
+function getRunAsUser(): { uid?: number; gid?: number } {
+  const uid =
+    process.env.SANDBOX_UID !== undefined ? parseInt(process.env.SANDBOX_UID, 10) : undefined;
+  const gid =
+    process.env.SANDBOX_GID !== undefined ? parseInt(process.env.SANDBOX_GID, 10) : undefined;
+  return { uid, gid };
+}
+
 export type { OpenSandboxConfigType } from './type';
 
 /**
@@ -269,7 +278,7 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
       }
     }
 
-    return 0;
+    return execution.error ? 1 : 0;
   }
 
   // ==================== Lifecycle Methods ====================
@@ -567,6 +576,7 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
   // ==================== File System ====================
   async writeFiles(entries: FileWriteEntry[]): Promise<FileWriteResult[]> {
     const results: FileWriteResult[] = [];
+    const { uid, gid } = getRunAsUser();
 
     for (const entry of entries) {
       const normalizedPath = this.normalizePath(entry.path);
@@ -576,8 +586,8 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
             path: normalizedPath,
             data: entry.data,
             mode: entry.mode,
-            owner: entry.owner,
-            group: entry.group
+            owner: entry.owner ?? (uid !== undefined ? String(uid) : undefined),
+            group: entry.group ?? (gid !== undefined ? String(gid) : undefined)
           }
         ]);
 
@@ -613,11 +623,14 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
     const stderrBuf = new BoundedOutputBuffer(maxBytes, '\n');
 
     try {
+      const { uid, gid } = getRunAsUser();
       const execution = await this.sandbox.commands.run(
         command,
         {
           workingDirectory: this.normalizePath(options?.workingDirectory),
-          background: options?.background
+          background: options?.background,
+          ...(uid !== undefined && { uid }),
+          ...(gid !== undefined && { gid })
         },
         {
           onStdout: (msg) => {
@@ -691,11 +704,14 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
           : {})
       };
 
+      const { uid, gid } = getRunAsUser();
       const execution = await this.sandbox.commands.run(
         command,
         {
           workingDirectory: this.normalizePath(options?.workingDirectory),
-          background: options?.background
+          background: options?.background,
+          ...(uid !== undefined && { uid }),
+          ...(gid !== undefined && { gid })
         },
         sdkHandlers
       );
