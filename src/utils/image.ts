@@ -15,8 +15,9 @@ export function parseImageSpec(image?: string): ImageSpec {
     return { repository: image.slice(0, atIndex), digest: image.slice(atIndex + 1) };
   }
 
-  const colonIndex = image.indexOf(':');
-  if (colonIndex > -1) {
+  const slashIndex = image.lastIndexOf('/');
+  const colonIndex = image.lastIndexOf(':');
+  if (colonIndex > slashIndex) {
     return { repository: image.slice(0, colonIndex), tag: image.slice(colonIndex + 1) };
   }
 

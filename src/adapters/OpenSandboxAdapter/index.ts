@@ -262,20 +262,53 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
     { id: string; status: SandboxStatus } | undefined
   > {
     const manager = SandboxManager.create({ connectionConfig: this._connection });
-    const result = await manager.listSandboxInfos({
-      metadata: { sessionId: this.connectionConfig.sessionId }
-    });
-    const val = result.items[0];
+    try {
+      const result = await manager.listSandboxInfos({
+        metadata: { sessionId: this.connectionConfig.sessionId }
+      });
+      const val = result.items[0];
 
-    if (val) {
-      const status = this.mapStatus(val.status);
+      if (val) {
+        const status = this.mapStatus(val.status);
 
-      return {
-        id: val.id,
-        status
-      };
+        return {
+          id: val.id,
+          status
+        };
+      }
+    } finally {
+      await manager.close().catch(() => undefined);
     }
   }
+
+  private async waitUntilSessionDeleted(timeoutMs: number = 120000): Promise<void> {
+    const startTime = Date.now();
+    const checkInterval = 1000;
+
+    while (Date.now() - startTime < timeoutMs) {
+      const sandbox = await this.getSandboxBySessionId();
+      if (!sandbox) {
+        return;
+      }
+      await this.sleep(checkInterval);
+    }
+
+    throw new SandboxStateError(
+      `Sandbox session ${this.connectionConfig.sessionId} was not deleted within ${timeoutMs}ms`,
+      'Deleting',
+      'UnExist'
+    );
+  }
+
+  private async killSandboxById(sandboxId: SandboxId): Promise<void> {
+    const manager = SandboxManager.create({ connectionConfig: this._connection });
+    try {
+      await manager.killSandbox(sandboxId);
+    } finally {
+      await manager.close().catch(() => undefined);
+    }
+  }
+
   async ensureRunning(): Promise<void> {
     const sandbox = await this.getSandboxBySessionId();
 
@@ -289,14 +322,14 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
           break;
         case 'Creating':
         case 'Starting':
-          await this.waitUntilReady();
+          await this.connect(sandbox.id);
           break;
         case 'Stopping':
         case 'Stopped':
           await this.resume(sandbox.id);
           break;
         case 'Deleting':
-          await this.waitUntilDeleted();
+          await this.waitUntilSessionDeleted();
           await this.create();
           break;
         case 'Error':
@@ -422,7 +455,17 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
   async stop(): Promise<void> {
     try {
       this._status = { state: 'Stopping' };
-      await this.sandbox.kill();
+
+      const existing = await this.getSandboxBySessionId();
+      if (!existing) {
+        this._status = { state: 'Stopped' };
+        return;
+      }
+
+      await this.killSandboxById(existing.id);
+      if (existing.id === this._id) {
+        this.sandbox = undefined;
+      }
       this._status = { state: 'Stopped' };
     } catch (error) {
       const message = error instanceof SandboxException ? error.error.message : undefined;
@@ -454,24 +497,25 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
   async delete(sandboxId?: SandboxId): Promise<void> {
     try {
       this._status = { state: 'Deleting' };
+      const targetId = sandboxId ?? this._id;
 
-      if (sandboxId) {
-        const manager = SandboxManager.create({ connectionConfig: this._connection });
-        try {
-          await manager.killSandbox(sandboxId);
-        } finally {
-          await manager.close().catch(() => undefined);
-        }
+      if (targetId) {
+        await this.killSandboxById(targetId);
 
-        if (sandboxId === this._id) {
+        if (targetId === this._id) {
           this.sandbox = undefined;
         }
         this._status = { state: 'UnExist' };
         return;
       }
 
-      await this.sandbox.kill();
-      this.sandbox = undefined;
+      const existing = await this.getSandboxBySessionId();
+      if (existing) {
+        await this.killSandboxById(existing.id);
+        if (existing.id === this._id) {
+          this.sandbox = undefined;
+        }
+      }
       this._status = { state: 'UnExist' };
     } catch (error) {
       throw new CommandExecutionError(

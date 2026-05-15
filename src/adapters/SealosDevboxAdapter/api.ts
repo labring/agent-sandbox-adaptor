@@ -11,6 +11,19 @@ import {
   type UploadResponseData
 } from './type';
 
+export class DevboxApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly rawBody: string,
+    public readonly url: string
+  ) {
+    super(message);
+    this.name = 'DevboxApiError';
+    Object.setPrototypeOf(this, DevboxApiError.prototype);
+  }
+}
+
 /**
  * HTTP client for the Sealos Devbox REST API.
  *
@@ -42,8 +55,25 @@ export class DevboxApi {
       headers.set('Content-Type', 'application/json');
     }
     const res = await fetch(input, { ...init, headers });
-    const result = (await res.json()) as DevboxApiResponse<T>;
-    return result;
+    const rawBody =
+      typeof res.text === 'function'
+        ? await res.text()
+        : JSON.stringify(await (res as unknown as { json: () => Promise<unknown> }).json());
+    let result: DevboxApiResponse<T>;
+    try {
+      result = JSON.parse(rawBody) as DevboxApiResponse<T>;
+    } catch {
+      throw new DevboxApiError(
+        `Devbox API returned non-JSON response (${res.status}): ${rawBody || res.statusText || res.status}`,
+        res.status,
+        rawBody,
+        input
+      );
+    }
+    return {
+      ...result,
+      code: result.code ?? res.status
+    };
   }
 
   /** POST /api/v1/devbox — create a devbox */

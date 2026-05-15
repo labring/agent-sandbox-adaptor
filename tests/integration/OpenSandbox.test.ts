@@ -60,6 +60,7 @@ describe.skipIf(!shouldRun).sequential('OpenSandboxAdapter Integration Tests', (
   });
 
   describeSandboxContract({
-    getAdapter: () => adapter
+    getAdapter: () => adapter,
+    supportsStartAfterStop: false
   });
 });

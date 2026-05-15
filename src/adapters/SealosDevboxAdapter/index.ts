@@ -16,11 +16,14 @@ import type {
   SandboxState
 } from '../../types';
 import { BaseSandboxAdapter } from '../BaseSandboxAdapter';
-import { DevboxApi } from './api';
+import { DevboxApi, DevboxApiError } from './api';
 import { DevboxPhaseEnum, type DevboxCreateRequest, type DevboxInfoData } from './type';
 import { SEALOS_DEVBOX_CODE_SERVER_PORT } from '../ports';
 import { formatImageSpec, parseImageSpec } from '@/utils/image';
 import { joinUrlPath, normalizePathPrefix } from '@/utils/url';
+
+const GET_INFO_RETRY_TIMEOUT_MS = 30_000;
+const GET_INFO_RETRY_INTERVAL_MS = 1_000;
 
 /**
  * Configuration for Sealos Devbox Adapter.
@@ -83,8 +86,12 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
       case DevboxPhaseEnum.Pending:
         return 'Creating';
       case DevboxPhaseEnum.Paused:
+      case DevboxPhaseEnum.Stopped:
+      case DevboxPhaseEnum.Shutdown:
         return 'Stopped';
       case DevboxPhaseEnum.Pausing:
+      case DevboxPhaseEnum.Stopping:
+      case DevboxPhaseEnum.Shutting:
         return 'Stopping';
       default:
         return 'Error';
@@ -114,6 +121,68 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
     return Object.fromEntries(Object.entries(obj).filter(([, value]) => value !== undefined)) as T;
   }
 
+  private assertMutationSuccess(
+    res: { code: number; message?: string },
+    action: string,
+    okCodes: number[] = []
+  ): void {
+    if ((res.code >= 200 && res.code < 300) || okCodes.includes(res.code)) {
+      return;
+    }
+
+    throw new Error(res.message || `Devbox ${action} failed with code ${res.code}`);
+  }
+
+  private isNotFoundResponse(res: { code?: number; message?: string }): boolean {
+    return (
+      res.code === 404 ||
+      String(res.message ?? '')
+        .toLowerCase()
+        .includes('not found')
+    );
+  }
+
+  private isRetryableGetInfoError(error: unknown): boolean {
+    let current: unknown = error;
+
+    while (current instanceof Error) {
+      if (current instanceof DevboxApiError) {
+        const rawBody = current.rawBody.toLowerCase();
+        return [502, 503, 504].includes(current.status) || rawBody.includes('no healthy upstream');
+      }
+      current = current.cause;
+    }
+
+    return false;
+  }
+
+  /**
+   * Devbox gateway can briefly return 502/503/504 during restart before the sandbox
+   * status is readable. Limit retry to the initial info probe to avoid repeating
+   * lifecycle mutations such as create/resume/delete.
+   */
+  private async getInfoWithProviderRetry(
+    timeoutMs = GET_INFO_RETRY_TIMEOUT_MS,
+    intervalMs = GET_INFO_RETRY_INTERVAL_MS
+  ): Promise<SandboxInfo | null> {
+    const startTime = Date.now();
+    let lastError: unknown;
+
+    while (Date.now() - startTime < timeoutMs) {
+      try {
+        return await this.getInfo();
+      } catch (error) {
+        lastError = error;
+        if (!this.isRetryableGetInfoError(error)) {
+          throw error;
+        }
+        await this.sleep(intervalMs);
+      }
+    }
+
+    throw lastError;
+  }
+
   // ==================== Lifecycle Methods ====================
 
   async getInfo(): Promise<SandboxInfo | null> {
@@ -124,7 +193,11 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
 
       const data: DevboxInfoData = res.data;
 
-      this._status = { state: this.StatusAdapt(data), message: res.message };
+      this._status = {
+        state: this.StatusAdapt(data),
+        reason: data.state.phase,
+        message: res.message
+      };
       return {
         id: data.name,
         image: parseImageSpec(data.image),
@@ -143,7 +216,7 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
 
   async ensureRunning(): Promise<void> {
     try {
-      const sandbox = await this.getInfo();
+      const sandbox = await this.getInfoWithProviderRetry();
       if (sandbox) {
         const status = sandbox.status.state;
         switch (status) {
@@ -161,14 +234,22 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
             await this.waitUntilDeleted();
             await this.create();
             return;
+          case 'Error':
+            throw new ConnectionError(
+              `Sandbox ${sandbox.id} is in error state: ${sandbox.status.reason ?? sandbox.status.message ?? 'unknown'}`,
+              this.config.baseUrl
+            );
           default:
-            throw new ConnectionError(`Failed to ensure sandbox running`);
+            throw new ConnectionError(`Sandbox state ${status} not supported`, this.config.baseUrl);
         }
       }
 
       // Not found, create sandbox
       await this.create();
     } catch (error: any) {
+      if (error instanceof ConnectionError) {
+        throw error;
+      }
       throw new ConnectionError(`Failed to ensure sandbox running`, this.config.baseUrl, error);
     }
   }
@@ -179,9 +260,7 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
     try {
       this._status = { state: 'Creating' };
       const res = await this.api.create(this.buildCreateRequest());
-      if (res.code !== 200 && res.code !== 201) {
-        throw new Error(res.message || `Devbox create failed with code ${res.code}`);
-      }
+      this.assertMutationSuccess(res, 'create');
       await this.waitUntilReady();
       await new Promise((resolve) => setTimeout(resolve, 1000));
       this._status = { state: 'Running' };
@@ -193,7 +272,12 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
   async stop(): Promise<void> {
     try {
       this._status = { state: 'Stopping' };
-      await this.api.stop(this._id);
+      const res = await this.api.stop(this._id);
+      if (this.isNotFoundResponse(res)) {
+        this._status = { state: 'Stopped' };
+        return;
+      }
+      this.assertMutationSuccess(res, 'stop');
       this._status = { state: 'Stopped' };
     } catch (error) {
       throw new CommandExecutionError(
@@ -207,7 +291,8 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
   async start(): Promise<void> {
     try {
       this._status = { state: 'Starting' };
-      await this.api.resume(this._id);
+      const res = await this.api.resume(this._id);
+      this.assertMutationSuccess(res, 'resume');
       await this.waitUntilReady();
       this._status = { state: 'Running' };
     } catch (error) {
@@ -223,7 +308,8 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
     try {
       const targetId = sandboxId ?? this._id;
       this._status = { state: 'Deleting' };
-      await this.api.delete(targetId);
+      const res = await this.api.delete(targetId);
+      this.assertMutationSuccess(res, 'delete', [404]);
       this._id = targetId;
       await this.waitUntilDeleted();
       this._status = { state: 'UnExist' };
@@ -292,6 +378,8 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
     }
 
     const target = await this.getHttpgateTarget(SEALOS_DEVBOX_CODE_SERVER_PORT);
+    await this.waitForCodeServerHealthz(target);
+
     return {
       service,
       origin: target.origin,
@@ -323,7 +411,11 @@ export class SealosDevboxAdapter extends BaseSandboxAdapter {
           return;
         }
 
-        lastResult = `status ${res.status}`;
+        const body =
+          typeof (res as unknown as { text?: () => Promise<string> }).text === 'function'
+            ? await (res as unknown as { text: () => Promise<string> }).text().catch(() => '')
+            : '';
+        lastResult = body.trim() ? `status ${res.status}: ${body.trim()}` : `status ${res.status}`;
       } catch (error) {
         lastResult = error instanceof Error ? error.message : String(error);
       }

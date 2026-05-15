@@ -22,6 +22,13 @@ describe('image utilities', () => {
         repository: 'nginx',
         digest: 'sha256:abc123'
       });
+      expect(parseImageSpec('registry.local:5000/ns/app:1.0')).toEqual({
+        repository: 'registry.local:5000/ns/app',
+        tag: '1.0'
+      });
+      expect(parseImageSpec('registry.local:5000/ns/app')).toEqual({
+        repository: 'registry.local:5000/ns/app'
+      });
       expect(parseImageSpec('nginx')).toEqual({ repository: 'nginx' });
     });
 
