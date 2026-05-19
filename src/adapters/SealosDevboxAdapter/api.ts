@@ -1,6 +1,7 @@
 import {
   type DevboxApiConfig,
   type DevboxApiResponse,
+  type DevboxCreateRequest,
   type DevboxInfoData,
   type DevboxMutationData,
   type DownloadFileParams,
@@ -9,6 +10,19 @@ import {
   type UploadFileParams,
   type UploadResponseData
 } from './type';
+
+export class DevboxApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly rawBody: string,
+    public readonly url: string
+  ) {
+    super(message);
+    this.name = 'DevboxApiError';
+    Object.setPrototypeOf(this, DevboxApiError.prototype);
+  }
+}
 
 /**
  * HTTP client for the Sealos Devbox REST API.
@@ -41,15 +55,32 @@ export class DevboxApi {
       headers.set('Content-Type', 'application/json');
     }
     const res = await fetch(input, { ...init, headers });
-    const result = (await res.json()) as DevboxApiResponse<T>;
-    return result;
+    const rawBody =
+      typeof res.text === 'function'
+        ? await res.text()
+        : JSON.stringify(await (res as unknown as { json: () => Promise<unknown> }).json());
+    let result: DevboxApiResponse<T>;
+    try {
+      result = JSON.parse(rawBody) as DevboxApiResponse<T>;
+    } catch {
+      throw new DevboxApiError(
+        `Devbox API returned non-JSON response (${res.status}): ${rawBody || res.statusText || res.status}`,
+        res.status,
+        rawBody,
+        input
+      );
+    }
+    return {
+      ...result,
+      code: result.code ?? res.status
+    };
   }
 
   /** POST /api/v1/devbox — create a devbox */
-  async create(name: string): Promise<DevboxApiResponse<DevboxMutationData>> {
+  async create(req: DevboxCreateRequest): Promise<DevboxApiResponse<DevboxMutationData>> {
     return this.request(this.url('/api/v1/devbox'), {
       method: 'POST',
-      body: JSON.stringify({ name })
+      body: JSON.stringify(req)
     });
   }
 
@@ -63,6 +94,13 @@ export class DevboxApi {
   /** POST /api/v1/devbox/{name}/pause */
   async pause(name: string): Promise<DevboxApiResponse<DevboxMutationData>> {
     return this.request(this.url(`/api/v1/devbox/${name}/pause`), {
+      method: 'POST'
+    });
+  }
+
+  /** POST /api/v1/devbox/{name}/stop */
+  async stop(name: string): Promise<DevboxApiResponse<DevboxMutationData>> {
+    return this.request(this.url(`/api/v1/devbox/${name}/stop`), {
       method: 'POST'
     });
   }

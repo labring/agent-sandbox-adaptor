@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Sandbox, SandboxManager } from '@alibaba-group/opensandbox';
 import { OpenSandboxAdapter } from '@/adapters/OpenSandboxAdapter';
 import type { OpenSandboxConnectionConfig } from '@/adapters/OpenSandboxAdapter';
 import { ConnectionError, SandboxStateError } from '@/errors';
-import type { ImageSpec, ResourceLimits } from '@/types';
+import type { ResourceLimits } from '@/types';
 import type { OpenSandboxConfigType } from '@/adapters/OpenSandboxAdapter/type';
 
 const MINIMAL_CONNECTION: OpenSandboxConnectionConfig = {
@@ -21,6 +22,11 @@ function makeAdapter(extra?: Partial<OpenSandboxConnectionConfig>): OpenSandboxA
  * command execution, and health checks using mocked SDK behavior.
  */
 describe('OpenSandboxAdapter', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
   describe('Lifecycle Methods', () => {
     it('should initialize with custom connection config', () => {
       const adapter = makeAdapter({ apiKey: 'test-api-key' });
@@ -88,62 +94,181 @@ describe('OpenSandboxAdapter', () => {
         expect(error instanceof ConnectionError || error instanceof Error).toBe(true);
       }
     });
+
+    it('should delete the provided sandbox id through lifecycle API without connecting', async () => {
+      const adapter = makeAdapter();
+      const killSandbox = vi.fn(async () => undefined);
+      const close = vi.fn(async () => undefined);
+      const managerCreate = vi.spyOn(SandboxManager, 'create').mockReturnValue({
+        killSandbox,
+        close
+      } as unknown as SandboxManager);
+      const connect = vi.spyOn(adapter, 'connect').mockImplementation(async () => {
+        throw new Error('delete(sandboxId) should not connect to execd');
+      });
+
+      await expect(adapter.delete('opensandbox-instance-1')).resolves.toBeUndefined();
+
+      expect(managerCreate).toHaveBeenCalledTimes(1);
+      expect(killSandbox).toHaveBeenCalledWith('opensandbox-instance-1');
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(connect).not.toHaveBeenCalled();
+      expect(adapter.status.state).toBe('UnExist');
+    });
+
+    it('should delete an unbound sandbox by looking up the connection session id', async () => {
+      const adapter = makeAdapter({ sessionId: 'session-1' });
+      const listSandboxInfos = vi.fn(async () => ({
+        items: [
+          {
+            id: 'opensandbox-instance-1',
+            status: { state: 'running' }
+          }
+        ]
+      }));
+      const killSandbox = vi.fn(async () => undefined);
+      const close = vi.fn(async () => undefined);
+      vi.spyOn(SandboxManager, 'create').mockReturnValue({
+        listSandboxInfos,
+        killSandbox,
+        close
+      } as unknown as SandboxManager);
+
+      await expect(adapter.delete()).resolves.toBeUndefined();
+
+      expect(listSandboxInfos).toHaveBeenCalledWith({ metadata: { sessionId: 'session-1' } });
+      expect(killSandbox).toHaveBeenCalledWith('opensandbox-instance-1');
+      expect(close).toHaveBeenCalledTimes(2);
+      expect(adapter.status.state).toBe('UnExist');
+    });
+
+    it('should stop an unbound sandbox by looking up the connection session id', async () => {
+      const adapter = makeAdapter({ sessionId: 'session-1' });
+      const listSandboxInfos = vi.fn(async () => ({
+        items: [
+          {
+            id: 'opensandbox-instance-1',
+            status: { state: 'running' }
+          }
+        ]
+      }));
+      const killSandbox = vi.fn(async () => undefined);
+      const close = vi.fn(async () => undefined);
+      vi.spyOn(SandboxManager, 'create').mockReturnValue({
+        listSandboxInfos,
+        killSandbox,
+        close
+      } as unknown as SandboxManager);
+
+      await expect(adapter.stop()).resolves.toBeUndefined();
+
+      expect(listSandboxInfos).toHaveBeenCalledWith({ metadata: { sessionId: 'session-1' } });
+      expect(killSandbox).toHaveBeenCalledWith('opensandbox-instance-1');
+      expect(close).toHaveBeenCalledTimes(2);
+      expect(adapter.status.state).toBe('Stopped');
+    });
+
+    it('should treat stop as idempotent when no sandbox exists for the session id', async () => {
+      const adapter = makeAdapter({ sessionId: 'session-1' });
+      const listSandboxInfos = vi.fn(async () => ({ items: [] }));
+      const killSandbox = vi.fn(async () => undefined);
+      const close = vi.fn(async () => undefined);
+      vi.spyOn(SandboxManager, 'create').mockReturnValue({
+        listSandboxInfos,
+        killSandbox,
+        close
+      } as unknown as SandboxManager);
+
+      await expect(adapter.stop()).resolves.toBeUndefined();
+
+      expect(listSandboxInfos).toHaveBeenCalledWith({ metadata: { sessionId: 'session-1' } });
+      expect(killSandbox).not.toHaveBeenCalled();
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(adapter.status.state).toBe('Stopped');
+    });
+
+    it('should connect to an existing creating sandbox resolved by session id', async () => {
+      const adapter = makeAdapter({ sessionId: 'session-1' });
+      const listSandboxInfos = vi.fn(async () => ({
+        items: [
+          {
+            id: 'opensandbox-instance-1',
+            status: { state: 'creating' }
+          }
+        ]
+      }));
+      const close = vi.fn(async () => undefined);
+      vi.spyOn(SandboxManager, 'create').mockReturnValue({
+        listSandboxInfos,
+        close
+      } as unknown as SandboxManager);
+      const connect = vi.spyOn(Sandbox, 'connect').mockResolvedValue({
+        id: 'opensandbox-instance-1'
+      } as unknown as Sandbox);
+
+      await expect(adapter.ensureRunning()).resolves.toBeUndefined();
+
+      expect(listSandboxInfos).toHaveBeenCalledWith({ metadata: { sessionId: 'session-1' } });
+      expect(connect).toHaveBeenCalledWith(
+        expect.objectContaining({ sandboxId: 'opensandbox-instance-1' })
+      );
+      expect(adapter.id).toBe('opensandbox-instance-1');
+      expect(adapter.status.state).toBe('Running');
+    });
+
+    it('should wait by session id when existing sandbox is deleting before creating a replacement', async () => {
+      const adapter = new OpenSandboxAdapter(
+        { ...MINIMAL_CONNECTION, sessionId: 'session-1' },
+        { image: { repository: 'node', tag: '20' } }
+      );
+      vi.spyOn(
+        adapter as unknown as { sleep(ms: number): Promise<void> },
+        'sleep'
+      ).mockResolvedValue(undefined);
+      vi.spyOn(adapter, 'ping').mockResolvedValue(true);
+      const listSandboxInfos = vi
+        .fn()
+        .mockResolvedValueOnce({
+          items: [
+            {
+              id: 'opensandbox-instance-1',
+              status: { state: 'deleting' }
+            }
+          ]
+        })
+        .mockResolvedValueOnce({
+          items: [
+            {
+              id: 'opensandbox-instance-1',
+              status: { state: 'deleting' }
+            }
+          ]
+        })
+        .mockResolvedValueOnce({ items: [] });
+      const close = vi.fn(async () => undefined);
+      vi.spyOn(SandboxManager, 'create').mockReturnValue({
+        listSandboxInfos,
+        close
+      } as unknown as SandboxManager);
+      const create = vi.spyOn(Sandbox, 'create').mockResolvedValue({
+        id: 'opensandbox-instance-2',
+        waitUntilReady: vi.fn(async () => undefined)
+      } as unknown as Sandbox);
+
+      await expect(adapter.ensureRunning()).resolves.toBeUndefined();
+
+      expect(listSandboxInfos).toHaveBeenCalledTimes(3);
+      expect(create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({ sessionId: 'session-1' })
+        })
+      );
+      expect(adapter.id).toBe('opensandbox-instance-2');
+      expect(adapter.status.state).toBe('Running');
+    });
   });
 
-  describe('Image and Resource Conversion', () => {
-    it('should convert ImageSpec to SDK format', () => {
-      const adapter = makeAdapter();
-
-      // Test tag format
-      const imageWithTag: ImageSpec = { repository: 'nginx', tag: 'latest' };
-      // Access private method through type assertion for testing
-      const convertImageSpec = (
-        adapter as unknown as { convertImageSpec(image: ImageSpec): string }
-      ).convertImageSpec;
-      expect(convertImageSpec(imageWithTag)).toBe('nginx:latest');
-
-      // Test digest format
-      const imageWithDigest: ImageSpec = {
-        repository: 'nginx',
-        digest: 'sha256:abc123'
-      };
-      expect(convertImageSpec(imageWithDigest)).toBe('nginx@sha256:abc123');
-
-      // Test tag and digest
-      const imageWithBoth: ImageSpec = {
-        repository: 'nginx',
-        tag: '1.0',
-        digest: 'sha256:abc123'
-      };
-      expect(convertImageSpec(imageWithBoth)).toBe('nginx:1.0@sha256:abc123');
-
-      // Test just repository
-      const imageRepoOnly: ImageSpec = { repository: 'nginx' };
-      expect(convertImageSpec(imageRepoOnly)).toBe('nginx');
-    });
-
-    it('should parse SDK image string to ImageSpec', () => {
-      const adapter = makeAdapter();
-      const parseImageSpec = (adapter as unknown as { parseImageSpec(image: string): ImageSpec })
-        .parseImageSpec;
-
-      // Test tag format
-      const withTag = parseImageSpec('nginx:latest');
-      expect(withTag.repository).toBe('nginx');
-      expect(withTag.tag).toBe('latest');
-
-      // Test digest format
-      const withDigest = parseImageSpec('nginx@sha256:abc123');
-      expect(withDigest.repository).toBe('nginx');
-      expect(withDigest.digest).toBe('sha256:abc123');
-
-      // Test repository only
-      const repoOnly = parseImageSpec('nginx');
-      expect(repoOnly.repository).toBe('nginx');
-      expect(repoOnly.tag).toBeUndefined();
-      expect(repoOnly.digest).toBeUndefined();
-    });
-
+  describe('Resource Conversion', () => {
     it('should convert ResourceLimits to SDK format', () => {
       const adapter = makeAdapter();
       const convertResourceLimits = (
@@ -252,6 +377,68 @@ describe('OpenSandboxAdapter', () => {
       expect(stateError.message).toContain('Sandbox not initialized');
       expect(stateError.currentState).toBe('UnExist');
       expect(stateError.requiredState).toBe('Running');
+    });
+  });
+
+  describe('Proxy Target', () => {
+    it('should resolve code-server readiness endpoint through execd proxy path', async () => {
+      const adapter = makeAdapter();
+      (
+        adapter as unknown as {
+          _sandbox: { getEndpoint(port: number): Promise<{ endpoint: string }> };
+        }
+      )._sandbox = {
+        getEndpoint: vi.fn(async () => ({
+          endpoint: 'localhost:55549'
+        }))
+      };
+
+      await expect(adapter.getEndpoint('code-server')).resolves.toEqual({
+        host: 'localhost',
+        port: 55549,
+        protocol: 'http',
+        url: 'http://localhost:55549/proxy/8080'
+      });
+    });
+
+    it('should resolve direct code-server proxy target through OpenSandbox API', async () => {
+      const fetchMock = vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          endpoint: 'host.docker.internal:55549/proxy/8080'
+        })
+      }));
+      vi.stubGlobal('fetch', fetchMock);
+
+      const adapter = makeAdapter({
+        apiKey: 'test-api-key',
+        baseUrl: 'http://localhost/v1',
+        replaceDockerInternalWithLocalhost: true
+      });
+      (adapter as unknown as { _id: string })._id = 'sandbox-1';
+
+      await expect(adapter.getProxyTarget('code-server')).resolves.toEqual({
+        service: 'code-server',
+        origin: 'http://localhost:55549',
+        basePath: '/proxy/8080',
+        auth: 'code-server'
+      });
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://localhost/v1/sandboxes/sandbox-1/endpoints/44772?use_server_proxy=false',
+        expect.objectContaining({
+          method: 'GET',
+          headers: expect.objectContaining({
+            Accept: 'application/json',
+            'OPEN-SANDBOX-API-KEY': 'test-api-key'
+          })
+        })
+      );
+      const [, requestInit] = fetchMock.mock.calls[0] as unknown as [
+        string,
+        { headers: Record<string, string> }
+      ];
+      const headers = requestInit.headers;
+      expect(headers.Authorization).toBeUndefined();
     });
   });
 

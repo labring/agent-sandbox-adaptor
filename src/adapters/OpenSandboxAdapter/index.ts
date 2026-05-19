@@ -18,11 +18,13 @@ import type {
   ExecuteResult,
   FileWriteEntry,
   FileWriteResult,
-  ImageSpec,
   ResourceLimits,
+  SandboxEndpointSelector,
   SandboxId,
   SandboxInfo,
   SandboxMetrics,
+  SandboxProxyService,
+  SandboxProxyTarget,
   SandboxState,
   SandboxStatus,
   StreamHandlers
@@ -30,7 +32,10 @@ import type {
 import { BaseSandboxAdapter } from '../BaseSandboxAdapter';
 import { CommandPolyfillService } from '@/polyfill/CommandPolyfillService';
 import { BoundedOutputBuffer } from '@/utils/outputBuffer';
+import { formatImageSpec, parseImageSpec } from '@/utils/image';
+import { joinUrlPath } from '@/utils/url';
 import type { OpenSandboxConfigType } from './type';
+import { OPEN_SANDBOX_CODE_SERVER_PORT, OPEN_SANDBOX_EXECD_PORT } from '../ports';
 
 const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
 
@@ -59,6 +64,11 @@ export interface OpenSandboxConnectionConfig {
   debug?: boolean;
   /** Route execd traffic through the OpenSandbox server proxy */
   useServerProxy?: boolean;
+  /**
+   * Rewrite OpenSandbox local endpoint host when sandbox-proxy runs on the host
+   * instead of inside Docker/Kubernetes.
+   */
+  replaceDockerInternalWithLocalhost?: boolean;
   /**
    * Sandbox runtime type.
    * @default 'docker'
@@ -170,31 +180,6 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
 
   // ==================== Image and Resource Conversion ====================
 
-  private convertImageSpec(image: ImageSpec): string {
-    const parts: string[] = [image.repository];
-    if (image.tag) {
-      parts.push(':', image.tag);
-    }
-    if (image.digest) {
-      parts.push('@', image.digest);
-    }
-    return parts.join('');
-  }
-
-  private parseImageSpec(image: string): ImageSpec {
-    const atIndex = image.indexOf('@');
-    if (atIndex > -1) {
-      return { repository: image.slice(0, atIndex), digest: image.slice(atIndex + 1) };
-    }
-
-    const colonIndex = image.indexOf(':');
-    if (colonIndex > -1) {
-      return { repository: image.slice(0, colonIndex), tag: image.slice(colonIndex + 1) };
-    }
-
-    return { repository: image };
-  }
-
   private convertResourceLimits(
     resourceLimits?: ResourceLimits
   ): Record<string, string> | undefined {
@@ -277,20 +262,53 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
     { id: string; status: SandboxStatus } | undefined
   > {
     const manager = SandboxManager.create({ connectionConfig: this._connection });
-    const result = await manager.listSandboxInfos({
-      metadata: { sessionId: this.connectionConfig.sessionId }
-    });
-    const val = result.items[0];
+    try {
+      const result = await manager.listSandboxInfos({
+        metadata: { sessionId: this.connectionConfig.sessionId }
+      });
+      const val = result.items[0];
 
-    if (val) {
-      const status = this.mapStatus(val.status);
+      if (val) {
+        const status = this.mapStatus(val.status);
 
-      return {
-        id: val.id,
-        status
-      };
+        return {
+          id: val.id,
+          status
+        };
+      }
+    } finally {
+      await manager.close().catch(() => undefined);
     }
   }
+
+  private async waitUntilSessionDeleted(timeoutMs: number = 120000): Promise<void> {
+    const startTime = Date.now();
+    const checkInterval = 1000;
+
+    while (Date.now() - startTime < timeoutMs) {
+      const sandbox = await this.getSandboxBySessionId();
+      if (!sandbox) {
+        return;
+      }
+      await this.sleep(checkInterval);
+    }
+
+    throw new SandboxStateError(
+      `Sandbox session ${this.connectionConfig.sessionId} was not deleted within ${timeoutMs}ms`,
+      'Deleting',
+      'UnExist'
+    );
+  }
+
+  private async killSandboxById(sandboxId: SandboxId): Promise<void> {
+    const manager = SandboxManager.create({ connectionConfig: this._connection });
+    try {
+      await manager.killSandbox(sandboxId);
+    } finally {
+      await manager.close().catch(() => undefined);
+    }
+  }
+
   async ensureRunning(): Promise<void> {
     const sandbox = await this.getSandboxBySessionId();
 
@@ -304,14 +322,14 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
           break;
         case 'Creating':
         case 'Starting':
-          await this.waitUntilReady();
+          await this.connect(sandbox.id);
           break;
         case 'Stopping':
         case 'Stopped':
           await this.resume(sandbox.id);
           break;
         case 'Deleting':
-          await this.waitUntilDeleted();
+          await this.waitUntilSessionDeleted();
           await this.create();
           break;
         case 'Error':
@@ -334,7 +352,7 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
     try {
       this._status = { state: 'Creating' };
 
-      const image = this.convertImageSpec(cfg.image);
+      const image = formatImageSpec(cfg.image);
       const resource = this.convertResourceLimits(cfg.resourceLimits);
 
       this.sandbox = await Sandbox.create({
@@ -437,7 +455,17 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
   async stop(): Promise<void> {
     try {
       this._status = { state: 'Stopping' };
-      await this.sandbox.kill();
+
+      const existing = await this.getSandboxBySessionId();
+      if (!existing) {
+        this._status = { state: 'Stopped' };
+        return;
+      }
+
+      await this.killSandboxById(existing.id);
+      if (existing.id === this._id) {
+        this.sandbox = undefined;
+      }
       this._status = { state: 'Stopped' };
     } catch (error) {
       const message = error instanceof SandboxException ? error.error.message : undefined;
@@ -466,11 +494,28 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
     }
   }
 
-  async delete(): Promise<void> {
+  async delete(sandboxId?: SandboxId): Promise<void> {
     try {
       this._status = { state: 'Deleting' };
-      await this.sandbox.kill();
-      this.sandbox = undefined;
+      const targetId = sandboxId ?? this._id;
+
+      if (targetId) {
+        await this.killSandboxById(targetId);
+
+        if (targetId === this._id) {
+          this.sandbox = undefined;
+        }
+        this._status = { state: 'UnExist' };
+        return;
+      }
+
+      const existing = await this.getSandboxBySessionId();
+      if (existing) {
+        await this.killSandboxById(existing.id);
+        if (existing.id === this._id) {
+          this.sandbox = undefined;
+        }
+      }
       this._status = { state: 'UnExist' };
     } catch (error) {
       throw new CommandExecutionError(
@@ -491,11 +536,23 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
   }
 
   /**
-   * Get endpoint information for a specific port exposed by the sandbox.
-   * @param port The port number to get endpoint for
-   * @returns Endpoint with host, port, protocol and url fields
+   * Get endpoint information for a provider endpoint or well-known service.
    */
-  async getEndpoint(port: number): Promise<Endpoint> {
+  async getEndpoint(selector: SandboxEndpointSelector): Promise<Endpoint> {
+    const port = typeof selector === 'number' ? selector : OPEN_SANDBOX_EXECD_PORT;
+    const endpoint = await this.getOpenSandboxEndpoint(port);
+
+    if (selector === 'code-server') {
+      return {
+        ...endpoint,
+        url: joinUrlPath(endpoint.url, `/proxy/${OPEN_SANDBOX_CODE_SERVER_PORT}`)
+      };
+    }
+
+    return endpoint;
+  }
+
+  private async getOpenSandboxEndpoint(port: number): Promise<Endpoint> {
     const sdkEndpoint = (await this.sandbox.getEndpoint(port)) as SdkEndpoint;
 
     const raw = sdkEndpoint.endpoint;
@@ -520,6 +577,63 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
     };
   }
 
+  async getProxyTarget(service: SandboxProxyService = 'code-server'): Promise<SandboxProxyTarget> {
+    if (service !== 'code-server') {
+      throw new FeatureNotSupportedError(
+        `Proxy service "${service}" is not supported by this provider`,
+        'getProxyTarget',
+        this.provider
+      );
+    }
+
+    return {
+      service,
+      origin: await this.getDirectEndpointOrigin(OPEN_SANDBOX_EXECD_PORT),
+      basePath: `/proxy/${OPEN_SANDBOX_CODE_SERVER_PORT}`,
+      auth: 'code-server'
+    };
+  }
+
+  private async getDirectEndpointOrigin(port: number): Promise<string> {
+    if (!this.id) {
+      throw new SandboxStateError(
+        'Sandbox not initialized. Call create() or connect() first.',
+        'UnExist',
+        'Running'
+      );
+    }
+
+    const headers: Record<string, string> = {
+      ...this._connection.headers,
+      Accept: 'application/json'
+    };
+
+    const response = await this._connection.fetch(
+      `${this._connection.getBaseUrl()}/sandboxes/${this.id}/endpoints/${port}?use_server_proxy=false`,
+      { method: 'GET', headers }
+    );
+
+    if (!response.ok) {
+      throw new ConnectionError(
+        `OpenSandbox endpoint lookup failed: HTTP ${response.status}`,
+        this.connectionConfig.baseUrl
+      );
+    }
+
+    const data = (await response.json()) as { endpoint?: string };
+    if (!data.endpoint) {
+      throw new ConnectionError('OpenSandbox returned no endpoint', this.connectionConfig.baseUrl);
+    }
+
+    let hostPort = data.endpoint.replace(/\/proxy\/\d+\/?$/, '');
+    if (this.connectionConfig.replaceDockerInternalWithLocalhost) {
+      hostPort = hostPort.replace(/^host\.docker\.internal\b/, 'localhost');
+    }
+
+    const url = new URL(/^https?:\/\//.test(hostPort) ? hostPort : `http://${hostPort}`);
+    return url.origin;
+  }
+
   async getInfo(): Promise<SandboxInfo | null> {
     if (!this._sandbox) {
       return null;
@@ -530,9 +644,9 @@ export class OpenSandboxAdapter extends BaseSandboxAdapter {
         id: info.id,
         image:
           typeof info.image === 'string'
-            ? this.parseImageSpec(info.image)
+            ? parseImageSpec(info.image)
             : 'uri' in info.image
-              ? this.parseImageSpec(info.image.uri)
+              ? parseImageSpec(info.image.uri)
               : info.image,
         entrypoint: info.entrypoint,
         metadata: info.metadata,

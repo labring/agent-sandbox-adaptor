@@ -3,9 +3,17 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 export interface SandboxContractOptions {
   getAdapter: () => ISandbox;
+  /**
+   * Some providers implement stop as termination instead of pause. They should
+   * still recreate via ensureRunning(), but cannot directly start() after stop().
+   */
+  supportsStartAfterStop?: boolean;
 }
 
-export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) => {
+export const describeSandboxContract = ({
+  getAdapter,
+  supportsStartAfterStop = true
+}: SandboxContractOptions) => {
   const adapter = getAdapter();
 
   // ==================== Container Lifecycle Operations ====================
@@ -57,33 +65,21 @@ export const describeSandboxContract = ({ getAdapter }: SandboxContractOptions) 
       });
     });
 
-    describe('pause() and resume()', () => {
-      it('should pause the container', async () => {
-        await adapter.stop();
+    if (supportsStartAfterStop) {
+      describe('stop() and start()', () => {
+        it('should stop the container', async () => {
+          await adapter.stop();
 
-        expect(['Stopped', 'Stopping']).toContain(adapter.status.state);
+          expect(adapter.status.state).toBe('Stopped');
+        });
+
+        it('should start the container', async () => {
+          await adapter.start();
+
+          expect(adapter.status.state).toBe('Running');
+        });
       });
-
-      it('should resume the container', async () => {
-        await adapter.start();
-
-        expect(adapter.status.state).toBe('Running');
-      });
-    });
-
-    describe('stop() and start()', () => {
-      it('should stop the container', async () => {
-        await adapter.stop();
-
-        expect(adapter.status.state).toBe('Stopped');
-      });
-
-      it('should start the container', async () => {
-        await adapter.start();
-
-        expect(adapter.status.state).toBe('Running');
-      });
-    });
+    }
 
     describe('waitUntilReady()', () => {
       it('should resolve when container is ready', async () => {

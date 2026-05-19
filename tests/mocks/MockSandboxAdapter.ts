@@ -73,10 +73,11 @@ export class MockSandboxAdapter extends BaseSandboxAdapter {
   }
 
   // Lifecycle methods (stubs)
-  async ensureRunning(_config: unknown): Promise<void> {
-    return this.create(_config);
+  async ensureRunning(): Promise<void> {
+    return this.create();
   }
-  async create(_config: unknown): Promise<void> {
+
+  async create(): Promise<void> {
     this._status = { state: 'Running' };
   }
 
@@ -88,7 +89,10 @@ export class MockSandboxAdapter extends BaseSandboxAdapter {
     this._status = { state: 'Stopped' };
   }
 
-  async delete(): Promise<void> {
+  async delete(sandboxId?: SandboxId): Promise<void> {
+    if (sandboxId) {
+      this._id = sandboxId;
+    }
     this._status = { state: 'UnExist' };
   }
 
